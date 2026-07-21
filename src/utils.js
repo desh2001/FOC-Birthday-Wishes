@@ -1,5 +1,7 @@
 import { getLocalImagePath } from './data.js';
 
+export const BOT_API_URL = (import.meta.env.VITE_BOT_URL || 'http://localhost:3001').replace(/\/$/, '');
+
 export function calculateCountdown(birthdayStr) {
     if (!birthdayStr) return { days: 0, text: "Unknown", isToday: false };
     

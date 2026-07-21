@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { X, Download, Image as ImageIcon, Sliders, Layers, Upload, Copy, Share2, CalendarClock } from 'lucide-react';
-import { getThumbnailUrl } from '../../utils.js';
+import { getThumbnailUrl, BOT_API_URL } from '../../utils.js';
 
 export default function GenerateCardModal({ student, onClose }) {
   const canvasRef = useRef(null);
@@ -223,7 +223,7 @@ Wishing you a year where your programs compile on the first try, your joy causes
             formData.append('caption', caption);
             formData.append('targetGroup', 'Bs'); // The target group name
 
-            const response = await fetch('http://localhost:3001/send-to-group', {
+            const response = await fetch(`${BOT_API_URL}/send-to-group`, {
                 method: 'POST',
                 body: formData
             });
@@ -298,7 +298,7 @@ Wishing you a year where your programs compile on the first try, your joy causes
             formData.append('targetGroup', 'FOC USJ Birthdays'); 
             formData.append('scheduledTime', targetDate.toISOString());
 
-            const response = await fetch('http://localhost:3001/schedule-card', {
+            const response = await fetch(`${BOT_API_URL}/schedule-card`, {
                 method: 'POST',
                 body: formData
             });

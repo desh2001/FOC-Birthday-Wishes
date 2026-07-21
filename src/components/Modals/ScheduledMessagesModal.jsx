@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, CalendarClock, Trash2, AlertCircle } from 'lucide-react';
+import { BOT_API_URL } from '../../utils.js';
 
 export default function ScheduledMessagesModal({ onClose }) {
   const [jobs, setJobs] = useState([]);
@@ -13,7 +14,7 @@ export default function ScheduledMessagesModal({ onClose }) {
   const fetchScheduledJobs = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:3001/scheduled-cards');
+      const response = await fetch(`${BOT_API_URL}/scheduled-cards`);
       const data = await response.json();
       
       if (data.success) {
@@ -24,7 +25,7 @@ export default function ScheduledMessagesModal({ onClose }) {
       }
     } catch (err) {
       console.error("Error fetching scheduled jobs:", err);
-      setError("Could not connect to the WhatsApp Bot. Make sure it's running on port 3001.");
+      setError(`Could not connect to the WhatsApp Bot at ${BOT_API_URL}. Make sure it's running.`);
     } finally {
       setLoading(false);
     }
@@ -34,7 +35,7 @@ export default function ScheduledMessagesModal({ onClose }) {
     if (!window.confirm('Are you sure you want to cancel this scheduled message?')) return;
     
     try {
-      const response = await fetch(`http://localhost:3001/scheduled-cards/${id}`, {
+      const response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}`, {
         method: 'DELETE'
       });
       const data = await response.json();

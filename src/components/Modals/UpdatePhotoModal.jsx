@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, UploadCloud, Link } from 'lucide-react';
-import { getThumbnailUrl } from '../../utils.js';
+import { getThumbnailUrl, BOT_API_URL } from '../../utils.js';
 import { doc, updateDoc } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../firebase.js';
@@ -56,7 +56,7 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
   // Silent — if the bot isn't running, this is a no-op and Firebase Storage is used instead.
   const saveImageLocally = async (base64, name, featured_name) => {
     try {
-      const response = await fetch('http://localhost:3001/save-image', {
+      const response = await fetch(`${BOT_API_URL}/save-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base64, name, featured_name }),

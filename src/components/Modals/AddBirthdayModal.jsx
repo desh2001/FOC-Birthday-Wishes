@@ -3,6 +3,7 @@ import { X, User, Sparkles, Calendar as CalendarIcon, Phone, BookOpen, UserCircl
 import { collection, addDoc } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../firebase.js';
+import { BOT_API_URL } from '../../utils.js';
 
 export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
   const [formData, setFormData] = useState({
@@ -60,7 +61,7 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
   // Silent — if the bot isn't running, this is a no-op and Firebase Storage is used instead.
   const saveImageLocally = async (base64, name, featured_name) => {
     try {
-      const response = await fetch('http://localhost:3001/save-image', {
+      const response = await fetch(`${BOT_API_URL}/save-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base64, name, featured_name }),

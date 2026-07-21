@@ -37,14 +37,22 @@ app.use('/scheduled-cards-images', express.static(CARDS_DIR));
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        args: ['--no-sandbox']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--no-first-run',
+            '--no-zygote'
+        ]
     }
 });
 
 let isClientReady = false;
+let latestQr = null; // stored so /qr endpoint can serve it as an image
 
 // WhatsApp event listeners
 client.on('qr', (qr) => {
+    latestQr = qr; // keep for browser-based QR scanning (used by /qr endpoint)
     // Print QR code to terminal
     console.log('SCAN THIS QR CODE TO LOG IN:');
     qrcode.generate(qr, { small: true });
@@ -57,12 +65,42 @@ client.on('ready', () => {
 });
 
 client.on('authenticated', () => {
+    latestQr = null; // clear QR once authenticated
     console.log('WhatsApp authenticated successfully!');
 });
 
 client.on('auth_failure', msg => {
     console.error('WhatsApp authentication failure:', msg);
 });
+
+// ── QR Code web endpoint ─────────────────────────────────────────────────────
+// Visit /qr in your browser to scan the WhatsApp QR code (useful on Render).
+// Uses qrcode npm package to render an HTML page with the QR image.
+app.get('/qr', async (req, res) => {
+    if (isClientReady) {
+        return res.send('<h2 style="font-family:sans-serif;color:green">✅ WhatsApp is already connected!</h2>');
+    }
+    if (!latestQr) {
+        return res.send('<h2 style="font-family:sans-serif;color:orange">⏳ QR not ready yet — wait a few seconds and refresh.</h2>');
+    }
+    // Dynamically import qrcode (npm package) to generate a PNG data URL
+    try {
+        const QRCode = await import('qrcode');
+        const qrDataUrl = await QRCode.default.toDataURL(latestQr);
+        res.send(`<!DOCTYPE html>
+<html>
+<head><title>WhatsApp QR</title><meta http-equiv="refresh" content="15"></head>
+<body style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;background:#111;color:#fff">
+  <h2>📱 Scan with WhatsApp</h2>
+  <img src="${qrDataUrl}" style="border-radius:16px;background:#fff;padding:16px;width:300px;height:300px;" />
+  <p style="opacity:.6;margin-top:12px">Page auto-refreshes every 15 seconds</p>
+</body>
+</html>`);
+    } catch (e) {
+        res.status(500).send('Error generating QR: ' + e.message);
+    }
+});
+// ────────────────────────────────────────────────────────────────────────────
 
 // Start WhatsApp client
 client.initialize();
