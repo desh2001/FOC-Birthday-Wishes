@@ -56,6 +56,25 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
     });
   };
 
+  // Save image to local disk via the whatsapp-bot Express server (port 3001).
+  // Silent — if the bot isn't running, this is a no-op and Firebase Storage is used instead.
+  const saveImageLocally = async (base64, name, featured_name) => {
+    try {
+      const response = await fetch('http://localhost:3001/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, name, featured_name }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.localPath || null; // e.g. "/img/Pasindu - Pasindu Udana.jpeg"
+      }
+    } catch {
+      console.warn('Local image save skipped — whatsapp-bot server not running.');
+    }
+    return null;
+  };
+
   const uploadBase64ToFirebase = async (base64String, studentName) => {
     const byteString = atob(base64String.split(',')[1]);
     const mimeString = base64String.split(',')[0].split(':')[1].split(';')[0];
@@ -98,10 +117,14 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
 
     setIsSubmitting(true);
     let finalUrl = '';
+    let localPath = null;
     
     try {
       if (method === 'upload' && file) {
         const compressedBase64 = await compressImage(file);
+        // 1. Save locally to public/img/ (requires whatsapp-bot to be running)
+        localPath = await saveImageLocally(compressedBase64, formData.name, formData.featured_name);
+        // 2. Upload to Firebase Storage as cloud backup
         finalUrl = await uploadBase64ToFirebase(compressedBase64, formData.name);
       } else if (method === 'url') {
         finalUrl = photoUrl.trim();
@@ -119,7 +142,8 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
         whatsapp: formData.whatsapp.trim(),
         course: formData.course,
         gender: formData.gender,
-        photo_url: finalUrl
+        photo_url: finalUrl,
+        ...(localPath && { local_photo_path: localPath }), // store local path if saved
       };
 
       await addDoc(collection(db, 'students'), newStudent);

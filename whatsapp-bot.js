@@ -23,8 +23,12 @@ if (!fs.existsSync(DATA_FILE)) {
 // Configure express app
 const app = express();
 app.use(cors());
+app.use(express.json({ limit: '10mb' })); // For base64 image payloads
 // Multer for handling multipart/form-data (file uploads)
 const upload = multer(); 
+
+// Resolve the public/img directory (relative to this script's location)
+const PUBLIC_IMG_DIR = path.resolve('public', 'img');
 
 // Serve scheduled cards static images
 app.use('/scheduled-cards-images', express.static(CARDS_DIR)); 
@@ -270,6 +274,46 @@ app.delete('/scheduled-cards/:id', (req, res) => {
     } catch (error) {
         console.error('Error canceling scheduled message:', error);
         res.status(500).json({ success: false, message: 'Failed to cancel scheduled message: ' + error.message });
+    }
+});
+
+// ── NEW: Save an uploaded profile image to public/img/ by student name ──────
+// Accepts JSON body: { base64: "data:image/jpeg;base64,...", name: "...", featured_name: "..." }
+// Saves to: public/img/{featured_name} - {name}.jpeg
+// Returns: { success: true, localPath: "/img/..." }
+app.post('/save-image', (req, res) => {
+    try {
+        const { base64, name, featured_name } = req.body;
+
+        if (!base64 || !name || !featured_name) {
+            return res.status(400).json({ success: false, message: 'Missing base64, name, or featured_name.' });
+        }
+
+        // Sanitize names: strip characters that are invalid in filenames
+        const sanitize = (str) => str.replace(/[\\/:*?"<>|]/g, '').trim();
+        const safeFeatured = sanitize(featured_name);
+        const safeName     = sanitize(name);
+        const fileName     = `${safeFeatured} - ${safeName}.jpeg`;
+        const filePath     = path.join(PUBLIC_IMG_DIR, fileName);
+
+        // Ensure the directory exists
+        if (!fs.existsSync(PUBLIC_IMG_DIR)) {
+            fs.mkdirSync(PUBLIC_IMG_DIR, { recursive: true });
+        }
+
+        // Decode base64 → Buffer
+        const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+
+        fs.writeFileSync(filePath, imageBuffer);
+
+        const localPath = `/img/${fileName}`;
+        console.log(`📸 Saved local image: ${filePath}`);
+        res.status(200).json({ success: true, localPath });
+
+    } catch (error) {
+        console.error('Error saving image locally:', error);
+        res.status(500).json({ success: false, message: 'Failed to save image: ' + error.message });
     }
 });
 

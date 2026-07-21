@@ -31,6 +31,14 @@ export function calculateCountdown(birthdayStr) {
 }
 
 export function getThumbnailUrl(student) {
+    if (!student) return "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120";
+
+    // 1. Prefer an explicitly saved local path (set when whatsapp-bot saves to public/img/)
+    if (student.local_photo_path && student.local_photo_path.trim() !== '') {
+        return student.local_photo_path;
+    }
+
+    // 2. Fall back to smart name-based matching against public/img/
     if (!student.photo_url || student.photo_url.trim() === '') {
         const localPath = getLocalImagePath(student);
         if (localPath) return localPath;
@@ -39,10 +47,12 @@ export function getThumbnailUrl(student) {
     
     const url = student.photo_url;
     
-    if (url.startsWith('data:image') || url.startsWith('http') && !url.includes('drive.google.com')) {
+    // 3. Direct URLs (Firebase Storage, http, data URIs)
+    if (url.startsWith('data:image') || (url.startsWith('http') && !url.includes('drive.google.com'))) {
         return url;
     }
     
+    // 4. Google Drive → convert to direct-view URL
     if (url.includes('drive.google.com')) {
         const idMatch = url.match(/id=([^&]+)/) || url.match(/\/d\/([^/]+)/);
         if (idMatch && idMatch[1]) {

@@ -10,6 +10,7 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
   const [photoUrl, setPhotoUrl] = useState('');
   const [file, setFile] = useState(null);
   const [fileName, setFileName] = useState('No file chosen');
+  const [previewSrc, setPreviewSrc] = useState(''); // live preview before upload
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -51,6 +52,25 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
     });
   };
 
+  // Save image to local disk via the whatsapp-bot Express server (port 3001).
+  // Silent — if the bot isn't running, this is a no-op and Firebase Storage is used instead.
+  const saveImageLocally = async (base64, name, featured_name) => {
+    try {
+      const response = await fetch('http://localhost:3001/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, name, featured_name }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.localPath || null;
+      }
+    } catch {
+      console.warn('Local image save skipped — whatsapp-bot server not running.');
+    }
+    return null;
+  };
+
   const uploadBase64ToFirebase = async (base64String, studentName) => {
     const byteString = atob(base64String.split(',')[1]);
     const mimeString = base64String.split(',')[0].split(':')[1].split(';')[0];
@@ -67,11 +87,17 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
 
   const handleFileChange = (e) => {
     if (e.target.files.length > 0) {
-      setFile(e.target.files[0]);
-      setFileName(e.target.files[0].name);
+      const selected = e.target.files[0];
+      setFile(selected);
+      setFileName(selected.name);
+      // Instantly preview the chosen file before any upload
+      const reader = new FileReader();
+      reader.onload = (ev) => setPreviewSrc(ev.target.result);
+      reader.readAsDataURL(selected);
     } else {
       setFile(null);
       setFileName('No file chosen');
+      setPreviewSrc('');
     }
   };
 
@@ -80,6 +106,7 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
     setIsSubmitting(true);
 
     let finalUrl = '';
+    let localPath = null;
     try {
       if (method === 'upload') {
         if (!file) {
@@ -88,6 +115,9 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
           return;
         }
         const compressedBase64 = await compressImage(file);
+        // 1. Save locally to public/img/ (requires whatsapp-bot to be running)
+        localPath = await saveImageLocally(compressedBase64, student.name, student.featured_name);
+        // 2. Upload to Firebase Storage as cloud backup
         finalUrl = await uploadBase64ToFirebase(compressedBase64, student.name);
       } else {
         finalUrl = photoUrl.trim();
@@ -101,9 +131,11 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
       // Update Firestore
       if (student.id) {
         const studentDocRef = doc(db, 'students', student.id);
-        await updateDoc(studentDocRef, { photo_url: finalUrl });
+        await updateDoc(studentDocRef, {
+          photo_url: finalUrl,
+          ...(localPath && { local_photo_path: localPath }), // store local path if saved
+        });
       } else {
-        // Fallback if data hasn't been uploaded yet or id is missing
         alert('Cannot update photo because this student record is not properly synced to Firebase yet.');
       }
 
@@ -129,12 +161,17 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
         <div className="modal-body">
           <div className="photo-edit-preview-container">
             <img 
-              src={thumbUrl} 
+              src={previewSrc || thumbUrl} 
               alt="Preview" 
               className="photo-edit-preview" 
               onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120"; }}
             />
             <h3 id="photo-edit-name">{student.featured_name}</h3>
+            {previewSrc && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-accent)', marginTop: '4px', fontWeight: 600 }}>
+                ✓ New photo selected
+              </p>
+            )}
           </div>
           <form onSubmit={handleSubmit} className="premium-form">
             <div className="form-group radio-group">
