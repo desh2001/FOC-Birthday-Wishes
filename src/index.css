@@ -1379,9 +1379,6 @@ button:active {
     border-color: var(--text-secondary);
 }
 
-.modal-body {
-    padding: 32px;
-}
 
 .modal-student-detail {
     display: grid;
@@ -2080,19 +2077,8 @@ button:active {
     border-color: var(--color-accent) !important;
 }
 
-/* Responsive adjustments for forms and header actions */
-@media (max-width: 600px) {
-    .add-birthday-header-btn {
-        padding: 8px 12px;
-        font-size: 0.75rem;
-        height: 38px;
-    }
-    
-    .form-row {
-        grid-template-columns: 1fr;
-        gap: 16px;
-    }
-}
+
+
 
 /* ==========================================================================
    Generate Card Modal Styles
