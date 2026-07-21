@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faculty of Computing Birthday System</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i data-lucide="cake" class="pulse-animation"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>FOC Birthday <span>Portal</span></h1>
+                    <p>Celebrating the Faculty of Computing Family</p>
+                </div>
+            </div>
+            
+            <div class="header-actions">
+                <button id="add-member-btn" class="primary-btn add-birthday-header-btn">
+                    <i data-lucide="plus"></i> Add Birthday
+                </button>
+                <div class="current-date-badge">
+                    <i data-lucide="calendar"></i>
+                    <span id="current-date-text">Loading date...</span>
+                </div>
+                <button id="theme-toggle" class="icon-btn" aria-label="Toggle Theme">
+                    <i data-lucide="sun" class="sun-icon"></i>
+                    <i data-lucide="moon" class="moon-icon"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Stats Bar -->
+        <section class="stats-section">
+            <div class="stat-card">
+                <div class="stat-icon cs-color"><i data-lucide="users"></i></div>
+                <div class="stat-info">
+                    <h3 id="stat-total">0</h3>
+                    <p>Total Members</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon se-color"><i data-lucide="gift"></i></div>
+                <div class="stat-info">
+                    <h3 id="stat-month">0</h3>
+                    <p>Birthdays This Month</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon is-color"><i data-lucide="award"></i></div>
+                <div class="stat-info">
+                    <h3 id="stat-next-days">0</h3>
+                    <p>Days to Next Birthday</p>
+                </div>
+            </div>
+            <div class="stat-card course-distribution">
+                <div class="course-stat">
+                    <span class="badge cs">CS</span>
+                    <span id="stat-cs">0</span>
+                </div>
+                <div class="course-stat">
+                    <span class="badge se">SE</span>
+                    <span id="stat-se">0</span>
+                </div>
+                <div class="course-stat">
+                    <span class="badge is">IS</span>
+                    <span id="stat-is">0</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Birthday Spotlight (Next Birthday) -->
+        <section class="spotlight-section">
+            <h2 class="section-title"><i data-lucide="sparkles"></i> Birthday Spotlight</h2>
+            <div class="spotlight-card glass-panel" id="spotlight-container">
+                <!-- Dynamic Content Loaded by JS -->
+                <div class="skeleton-loader spotlight-skeleton"></div>
+            </div>
+        </section>
+
+        <!-- Upcoming Birthdays Horizontal Timeline -->
+        <section class="timeline-section">
+            <h2 class="section-title"><i data-lucide="hourglass"></i> Coming Up Next</h2>
+            <div class="timeline-container" id="timeline-container">
+                <!-- Loaded dynamically by JS -->
+                <div class="skeleton-loader timeline-skeleton"></div>
+            </div>
+        </section>
+
+        <!-- Main Workspace: Search, Filter, Grid -->
+        <section class="directory-section">
+            <div class="directory-header">
+                <h2 class="section-title"><i data-lucide="book-open"></i> Student Directory</h2>
+                
+                <!-- Filters Controls -->
+                <div class="filter-controls glass-panel">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="search-input" placeholder="Search by name or number...">
+                        <button id="clear-search" class="clear-btn"><i data-lucide="x"></i></button>
+                    </div>
+                    
+                    <div class="dropdown-filters">
+                        <div class="select-wrapper">
+                            <i data-lucide="book-open" class="select-icon"></i>
+                            <select id="filter-course">
+                                <option value="all">All Courses</option>
+                                <option value="CS">Computer Science (CS)</option>
+                                <option value="SE">Software Engineering (SE)</option>
+                                <option value="IS">Information Systems (IS)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="select-wrapper">
+                            <i data-lucide="calendar" class="select-icon"></i>
+                            <select id="filter-month">
+                                <option value="all">All Months</option>
+                                <option value="1">January</option>
+                                <option value="2">February</option>
+                                <option value="3">March</option>
+                                <option value="4">April</option>
+                                <option value="5">May</option>
+                                <option value="6">June</option>
+                                <option value="7">July</option>
+                                <option value="8">August</option>
+                                <option value="9">September</option>
+                                <option value="10">October</option>
+                                <option value="11">November</option>
+                                <option value="12">December</option>
+                            </select>
+                        </div>
+
+                        <div class="select-wrapper">
+                            <i data-lucide="user" class="select-icon"></i>
+                            <select id="filter-gender">
+                                <option value="all">All Genders</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Filters Indicators -->
+            <div class="active-filters-bar" id="active-filters-bar" style="display: none;">
+                <span class="active-filters-label">Active filters:</span>
+                <div class="active-filters-tags" id="active-filters-tags"></div>
+                <button id="reset-all-filters" class="reset-link-btn">Clear All</button>
+            </div>
+
+            <!-- Directory Grid -->
+            <div class="directory-grid" id="directory-grid">
+                <!-- Student Cards Loaded dynamically by JS -->
+            </div>
+            
+            <!-- Empty State -->
+            <div class="empty-state" id="empty-state" style="display: none;">
+                <i data-lucide="search-code"></i>
+                <h3>No Birthdays Found</h3>
+                <p>Try adjusting your search terms or filters.</p>
+                <button id="empty-reset-btn" class="primary-btn">Reset Filters</button>
+            </div>
+
+            <!-- Pagination / Load More -->
+            <div class="pagination-container" id="pagination-container">
+                <button id="load-more-btn" class="secondary-btn">
+                    <span>Load More Students</span>
+                    <i data-lucide="chevron-down"></i>
+                </button>
+            </div>
+        </section>
+    </div>
+    <!-- Student Detail Modal -->
+    <div class="modal-overlay" id="student-modal" style="display: none;">
+        <div class="modal-content glass-panel animate-scale">
+            <button class="modal-close-btn" id="modal-close"><i data-lucide="x"></i></button>
+            <div class="modal-body" id="modal-body-content">
+                <!-- Dynamically filled by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Birthday Modal -->
+    <div class="modal-overlay" id="add-birthday-modal" style="display: none;">
+        <div class="modal-content glass-panel animate-scale" style="max-width: 500px;">
+            <button class="modal-close-btn" id="add-birthday-close"><i data-lucide="x"></i></button>
+            <div class="modal-body">
+                <h2 style="font-family: var(--font-heading); margin-bottom: 20px; font-weight: 800; display: flex; align-items: center; gap: 10px; color: var(--text-primary);">
+                    <i data-lucide="cake" style="color: var(--color-accent);"></i> Add New Birthday
+                </h2>
+                <form id="add-birthday-form" class="portal-form">
+                    <div class="form-group">
+                        <label for="new-name">Full Name</label>
+                        <input type="text" id="new-name" placeholder="e.g. W.D. Chamindu Sandeepa Gunathunga" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-featured-name">Featured Name (Display Name)</label>
+                        <input type="text" id="new-featured-name" placeholder="e.g. Chamindu Sandeepa" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="new-birthday">Birthday</label>
+                            <input type="date" id="new-birthday" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-whatsapp">WhatsApp Contact</label>
+                            <input type="tel" id="new-whatsapp" placeholder="e.g. 0772817660" pattern="0[0-9]{9}" title="Please enter a valid 10-digit Sri Lankan phone number starting with 0" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="new-course">Course</label>
+                            <select id="new-course" required>
+                                <option value="" disabled selected>Select Course</option>
+                                <option value="CS">Computer Science (CS)</option>
+                                <option value="SE">Software Engineering (SE)</option>
+                                <option value="IS">Information Systems (IS)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-gender">Gender</label>
+                            <select id="new-gender" required>
+                                <option value="" disabled selected>Select Gender</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Photo Attachment Method</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="photo-method" value="upload" checked> Upload File
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="photo-method" value="url"> Drive URL
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="photo-upload-group">
+                        <div class="current-photo-preview-container" id="new-photo-preview-container" style="display: none; margin-bottom: 12px;">
+                            <img id="new-photo-preview" src="" alt="Preview" class="photo-edit-preview">
+                        </div>
+                        <label for="new-photo-file" class="file-upload-label">
+                            <i data-lucide="upload-cloud"></i> Select Image File
+                        </label>
+                        <input type="file" id="new-photo-file" accept="image/*">
+                        <span id="file-name-indicator" class="file-name-indicator">No file chosen</span>
+                    </div>
+                    <div class="form-group" id="photo-url-group" style="display: none;">
+                        <label for="new-photo-url">Google Drive Link</label>
+                        <input type="url" id="new-photo-url" placeholder="https://drive.google.com/open?id=...">
+                    </div>
+                    <button type="submit" class="primary-btn submit-btn" style="width: 100%; margin-top: 16px;">
+                        <i data-lucide="plus-circle"></i> Save Member
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Photo Modal -->
+    <div class="modal-overlay" id="update-photo-modal" style="display: none;">
+        <div class="modal-content glass-panel animate-scale" style="max-width: 450px;">
+            <button class="modal-close-btn" id="update-photo-close"><i data-lucide="x"></i></button>
+            <div class="modal-body">
+                <h2 style="font-family: var(--font-heading); margin-bottom: 20px; font-weight: 800; display: flex; align-items: center; gap: 10px; color: var(--text-primary);">
+                    <i data-lucide="camera" style="color: var(--color-accent);"></i> Update Profile Photo
+                </h2>
+                <div class="current-photo-preview-container">
+                    <img id="photo-edit-preview" src="" alt="Preview" class="photo-edit-preview" onerror="this.src='https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120'">
+                </div>
+                <h4 id="photo-edit-name" style="text-align: center; margin-bottom: 20px; font-weight: 700; color: var(--text-primary);">Student Name</h4>
+                <form id="update-photo-form" class="portal-form">
+                    <input type="hidden" id="photo-edit-student-name">
+                    <div class="form-group">
+                        <label>Update Method</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="edit-photo-method" value="upload" checked> Upload File
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="edit-photo-method" value="url"> Drive URL
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="edit-photo-upload-group">
+                        <label for="edit-photo-file" class="file-upload-label">
+                            <i data-lucide="upload-cloud"></i> Select Image File
+                        </label>
+                        <input type="file" id="edit-photo-file" accept="image/*">
+                        <span id="edit-file-name-indicator" class="file-name-indicator">No file chosen</span>
+                    </div>
+                    <div class="form-group" id="edit-photo-url-group" style="display: none;">
+                        <label for="edit-photo-url">Google Drive Link</label>
+                        <input type="url" id="edit-photo-url" placeholder="https://drive.google.com/open?id=...">
+                    </div>
+                    <button type="submit" class="primary-btn submit-btn" style="width: 100%; margin-top: 16px;">
+                        <i data-lucide="save"></i> Save Changes
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Script (Module) -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>

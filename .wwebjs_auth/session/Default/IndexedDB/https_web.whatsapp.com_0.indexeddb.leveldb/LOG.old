@@ -1,0 +1,12 @@
+2026/05/23-10:01:34.090 c8c Reusing MANIFEST D:\GitHub\Birthday System\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/05/23-10:01:34.090 c8c Recovering log #18
+2026/05/23-10:01:34.117 c8c Reusing old log D:\GitHub\Birthday System\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000018.log 
+2026/05/23-10:01:35.318 c8c Level-0 table #23: started
+2026/05/23-10:01:35.335 c8c Level-0 table #23: 1680844 bytes OK
+2026/05/23-10:01:35.337 c8c Delete type=0 #18
+2026/05/23-10:01:36.066 c8c Compacting 1@1 + 1@2 files
+2026/05/23-10:01:36.114 c8c Generated table #24@1: 38975 keys, 2011077 bytes
+2026/05/23-10:01:36.114 c8c Compacted 1@1 + 1@2 files => 2011077 bytes
+2026/05/23-10:01:36.115 c8c compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/05/23-10:01:36.116 c8c Delete type=2 #20
+2026/05/23-10:01:36.116 c8c Delete type=2 #23
