@@ -72,17 +72,22 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
   };
 
   const uploadBase64ToFirebase = async (base64String, studentName) => {
-    const byteString = atob(base64String.split(',')[1]);
-    const mimeString = base64String.split(',')[0].split(':')[1].split(';')[0];
-    const ab = new ArrayBuffer(byteString.length);
-    const ia = new Uint8Array(ab);
-    for (let i = 0; i < byteString.length; i++) {
-        ia[i] = byteString.charCodeAt(i);
+    try {
+      const byteString = atob(base64String.split(',')[1]);
+      const mimeString = base64String.split(',')[0].split(':')[1].split(';')[0];
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+          ia[i] = byteString.charCodeAt(i);
+      }
+      const blob = new Blob([ab], {type: mimeString});
+      const sRef = storageRef(storage, `photos/${Date.now()}_${studentName.replace(/[^a-z0-9]/gi, '_')}.jpg`);
+      await uploadBytes(sRef, blob);
+      return await getDownloadURL(sRef);
+    } catch (err) {
+      console.warn("Firebase Storage upload fallback triggered:", err);
+      return base64String;
     }
-    const blob = new Blob([ab], {type: mimeString});
-    const sRef = storageRef(storage, `photos/${Date.now()}_${studentName.replace(/[^a-z0-9]/gi, '_')}.jpg`);
-    await uploadBytes(sRef, blob);
-    return await getDownloadURL(sRef);
   };
 
   const handleFileChange = (e) => {

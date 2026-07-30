@@ -184,13 +184,12 @@ export default function GenerateCardModal({ student, onClose }) {
     link.click();
   };
 
+  const studentName = student.featured_name || student.name || 'Student';
+  const [caption, setCaption] = useState(
+    `Happy Birthday from the Faculty of Computing at USJ! 🎉💻🎂\n\nWishing you a year where your programs compile on the first try, your joy causes a stack overflow, and your future shines as bright as your screen in dark mode.🥳💾🎈\n\n#FOC\n#USJ`
+  );
+
   const handleCopyCaption = () => {
-    const caption = `Happy Birthday from the Faculty of Computing at USJ! 🎉💻🎂
-
-Wishing you a year where your programs compile on the first try, your joy causes a stack overflow, and your future shines as bright as your screen in dark mode.🥳💾🎈
-
-#FOC
-#USJ`;
     navigator.clipboard.writeText(caption).then(() => {
         alert("Caption copied to clipboard!");
     }).catch(err => {
@@ -200,13 +199,6 @@ Wishing you a year where your programs compile on the first try, your joy causes
   };
 
   const handleShareWhatsApp = async () => {
-    const caption = `Happy Birthday from the Faculty of Computing at USJ! 🎉💻🎂
-
-Wishing you a year where your programs compile on the first try, your joy causes a stack overflow, and your future shines as bright as your screen in dark mode.🥳💾🎈
-
-#FOC
-#USJ`;
-
     if (!canvasRef.current) return;
     setIsSending(true);
 
@@ -216,12 +208,35 @@ Wishing you a year where your programs compile on the first try, your joy causes
             setIsSending(false);
             return;
         }
-        
+
+        const fileName = `Birthday_Card_${studentName.replace(/\s+/g, '_')}.png`;
+        const file = new File([blob], fileName, { type: 'image/png' });
+
+        // 1. Copy image to Clipboard for instant pasting (Ctrl+V) into WhatsApp
+        try {
+            if (navigator.clipboard && window.ClipboardItem) {
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+            }
+        } catch (clipErr) {
+            console.log("Could not copy image to clipboard:", clipErr);
+        }
+
+        // 2. Copy caption text to clipboard
+        try {
+            await navigator.clipboard.writeText(caption);
+        } catch (e) {
+            console.log("Could not copy caption text to clipboard:", e);
+        }
+
+        // 3. Try sending automatically via local WhatsApp Bot API if active
+        let botSent = false;
         try {
             const formData = new FormData();
-            formData.append('image', blob, `Birthday_Card_${student.featured_name.replace(/\s+/g, '_')}.png`);
+            formData.append('image', blob, fileName);
             formData.append('caption', caption);
-            formData.append('targetGroup', 'Bs'); // The target group name
+            formData.append('targetGroup', 'Bs');
 
             const response = await fetch(`${BOT_API_URL}/send-to-group`, {
                 method: 'POST',
@@ -229,32 +244,44 @@ Wishing you a year where your programs compile on the first try, your joy causes
             });
 
             const result = await response.json();
-            
             if (result.success) {
-                alert("Successfully sent the birthday card to 'Bs' WhatsApp group!");
-            } else {
-                alert(`Failed to send: ${result.message}`);
-                console.error("Bot error:", result.message);
+                botSent = true;
+                alert("Successfully sent the birthday card & caption to WhatsApp group via Bot!");
             }
         } catch (error) {
-            console.error("Network or API error:", error);
-            alert("Could not connect to the WhatsApp Bot. Is it running on port 3001? (Run 'node whatsapp-bot.js' in terminal)");
-            // Optional fallback
-            navigator.clipboard.writeText(caption);
-        } finally {
-            setIsSending(false);
+            console.log("WhatsApp Bot server not active:", error);
         }
+
+        // 4. Try Web Share API (Mobile devices / Native app share)
+        let sharedViaNative = false;
+        if (!botSent) {
+            try {
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: `Happy Birthday ${studentName}!`,
+                        text: caption
+                    });
+                    sharedViaNative = true;
+                }
+            } catch (shareError) {
+                console.log("Web Share API skipped or cancelled:", shareError);
+            }
+        }
+
+        // 5. Open WhatsApp Application / WhatsApp Web if not sent via Bot or Native Share
+        if (!botSent && !sharedViaNative) {
+            const encodedText = encodeURIComponent(caption);
+            const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
+            window.open(whatsappUrl, '_blank');
+            alert("Opening WhatsApp with caption! The card image has been copied to your clipboard — press Ctrl+V (Paste) in your chat to attach the image.");
+        }
+
+        setIsSending(false);
     }, 'image/png');
   };
 
   const handleScheduleWhatsApp = async () => {
-    const caption = `Happy Birthday from the Faculty of Computing at USJ! 🎉💻🎂
-
-Wishing you a year where your programs compile on the first try, your joy causes a stack overflow, and your future shines as bright as your screen in dark mode.🥳💾🎈
-
-#FOC
-#USJ`;
-
     if (!canvasRef.current) return;
 
     // Calculate upcoming birthday + selected time
@@ -293,7 +320,7 @@ Wishing you a year where your programs compile on the first try, your joy causes
         
         try {
             const formData = new FormData();
-            formData.append('image', blob, `Birthday_Card_${student.featured_name.replace(/\s+/g, '_')}.png`);
+            formData.append('image', blob, `Birthday_Card_${studentName.replace(/\s+/g, '_')}.png`);
             formData.append('caption', caption);
             formData.append('targetGroup', 'FOC USJ Birthdays'); 
             formData.append('scheduledTime', targetDate.toISOString());
@@ -306,7 +333,7 @@ Wishing you a year where your programs compile on the first try, your joy causes
             const result = await response.json();
             
             if (result.success) {
-                alert(`Successfully scheduled! The card will be sent to 'Bs' on ${targetDate.toLocaleString()}`);
+                alert(`Successfully scheduled! The card will be sent on ${targetDate.toLocaleString()}`);
             } else {
                 alert(`Failed to schedule: ${result.message}`);
             }
@@ -320,7 +347,9 @@ Wishing you a year where your programs compile on the first try, your joy causes
   };
 
   return (
-    <div className="modal-overlay">
+    <div className="modal-overlay" onClick={(e) => {
+      if (e.target.classList.contains('modal-overlay')) onClose();
+    }}>
       <div className="modal-content glass-panel generate-modal">
         <div className="modal-header">
           <h2><ImageIcon size={20} /> Generate Birthday Card</h2>
@@ -441,6 +470,27 @@ Wishing you a year where your programs compile on the first try, your joy causes
                     value={textColor} 
                     onChange={(e) => setTextColor(e.target.value)} 
                     style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+                />
+            </div>
+
+            <div className="control-group">
+                <label>WhatsApp Message / Caption</label>
+                <textarea 
+                    rows={4}
+                    value={caption}
+                    onChange={(e) => setCaption(e.target.value)}
+                    style={{ 
+                        width: '100%', 
+                        padding: '10px', 
+                        borderRadius: 'var(--radius-sm)', 
+                        border: '1px solid var(--border-glass)', 
+                        background: 'rgba(0,0,0,0.15)', 
+                        color: 'var(--text-primary)',
+                        resize: 'vertical',
+                        fontSize: '0.85rem',
+                        fontFamily: 'inherit',
+                        marginTop: '6px'
+                    }}
                 />
             </div>
 

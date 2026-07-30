@@ -2084,14 +2084,38 @@ button:active {
    Generate Card Modal Styles
    ========================================================================== */
 .generate-modal {
-    max-width: 900px !important;
+    max-width: 960px !important;
+    max-height: 90vh !important;
+    display: flex;
+    flex-direction: column;
 }
 
 .generate-layout {
     display: grid;
-    grid-template-columns: 1fr 300px;
+    grid-template-columns: 1fr 340px;
     gap: 24px;
     padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.generate-layout::-webkit-scrollbar {
+    width: 6px;
+}
+
+.generate-layout::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+}
+
+.generate-layout::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+.generate-layout::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.4);
 }
 
 .canvas-preview-area {
@@ -2101,9 +2125,11 @@ button:active {
     display: flex;
     justify-content: center;
     align-items: center;
-    position: relative;
+    position: sticky;
+    top: 0;
+    align-self: start;
     border: 1px solid var(--border-glass);
-    min-height: 400px;
+    min-height: 350px;
 }
 
 .canvas-wrapper {
@@ -2210,8 +2236,15 @@ input[type=range]::-webkit-slider-runnable-track {
 @media (max-width: 768px) {
     .generate-layout {
         grid-template-columns: 1fr;
+        padding: 16px;
+    }
+    .canvas-preview-area {
+        position: relative;
+        top: auto;
+        min-height: unset;
     }
     .canvas-wrapper {
-        max-width: 300px;
+        max-width: 280px;
     }
 }
+
