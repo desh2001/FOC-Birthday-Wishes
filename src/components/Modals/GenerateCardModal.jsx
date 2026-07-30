@@ -346,6 +346,8 @@ export default function GenerateCardModal({ student, onClose }) {
     }, 'image/png');
   };
 
+  const [activeTab, setActiveTab] = useState('photo'); // 'photo', 'text', 'message'
+
   return (
     <div className="modal-overlay" onClick={(e) => {
       if (e.target.classList.contains('modal-overlay')) onClose();
@@ -374,135 +376,173 @@ export default function GenerateCardModal({ student, onClose }) {
           </div>
 
           <div className="canvas-controls-area">
-            <h3><Sliders size={18} /> Adjust Photo</h3>
-            
-            <div className="control-group" style={{ marginBottom: '8px' }}>
-                <label className="file-upload-label" style={{ padding: '16px 12px', marginTop: 0, gap: '8px' }}>
-                    <Upload size={24} />
-                    <span>Upload Custom Photo</span>
-                    <input type="file" accept="image/*" onChange={handleImageUpload} />
-                </label>
+            {/* Control Tabs */}
+            <div className="control-tabs">
+              <button 
+                className={`tab-btn ${activeTab === 'photo' ? 'active' : ''}`}
+                onClick={() => setActiveTab('photo')}
+              >
+                <Upload size={15} /> Photo
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'text' ? 'active' : ''}`}
+                onClick={() => setActiveTab('text')}
+              >
+                <Sliders size={15} /> Text & Style
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'message' ? 'active' : ''}`}
+                onClick={() => setActiveTab('message')}
+              >
+                <Share2 size={15} /> Caption
+              </button>
             </div>
 
-            <div className="control-group">
-                <label>Layer Order <Layers size={14}/></label>
-                <div className="toggle-group">
-                    <button 
-                        className={`toggle-btn ${photoLayer === 'behind' ? 'active' : ''}`}
-                        onClick={() => setPhotoLayer('behind')}
-                    >
-                        Photo Behind
-                    </button>
-                    <button 
-                        className={`toggle-btn ${photoLayer === 'above' ? 'active' : ''}`}
-                        onClick={() => setPhotoLayer('above')}
-                    >
-                        Photo Above
-                    </button>
+            {activeTab === 'photo' && (
+              <div className="tab-pane">
+                <h3><Sliders size={18} /> Adjust Photo</h3>
+                
+                <div className="control-group" style={{ marginBottom: '8px' }}>
+                    <label className="file-upload-label" style={{ padding: '14px 12px', marginTop: 0, gap: '8px' }}>
+                        <Upload size={20} />
+                        <span>Upload Custom Photo</span>
+                        <input type="file" accept="image/*" onChange={handleImageUpload} />
+                    </label>
                 </div>
-                <small className="control-hint">If the template's middle is transparent, use 'Behind'.</small>
-            </div>
 
-            <div className="control-group">
-                <label>Scale ({scale.toFixed(2)}x)</label>
-                <input 
-                    type="range" 
-                    min="0.1" 
-                    max="5" 
-                    step="0.05" 
-                    value={scale} 
-                    onChange={(e) => setScale(parseFloat(e.target.value))} 
-                />
-            </div>
+                <div className="control-group">
+                    <label>Layer Order <Layers size={14}/></label>
+                    <div className="toggle-group">
+                        <button 
+                            className={`toggle-btn ${photoLayer === 'behind' ? 'active' : ''}`}
+                            onClick={() => setPhotoLayer('behind')}
+                        >
+                            Photo Behind
+                        </button>
+                        <button 
+                            className={`toggle-btn ${photoLayer === 'above' ? 'active' : ''}`}
+                            onClick={() => setPhotoLayer('above')}
+                        >
+                            Photo Above
+                        </button>
+                    </div>
+                    <small className="control-hint">If template middle is transparent, use 'Behind'.</small>
+                </div>
 
-            <div className="control-group">
-                <label>Horizontal Pan (X: {panX}px)</label>
-                <input 
-                    type="range" 
-                    min={-CANVAS_W} 
-                    max={CANVAS_W} 
-                    step="10" 
-                    value={panX} 
-                    onChange={(e) => setPanX(parseInt(e.target.value))} 
-                />
-            </div>
+                <div className="control-group">
+                    <label>Scale ({scale.toFixed(2)}x)</label>
+                    <input 
+                        type="range" 
+                        min="0.1" 
+                        max="5" 
+                        step="0.05" 
+                        value={scale} 
+                        onChange={(e) => setScale(parseFloat(e.target.value))} 
+                    />
+                </div>
 
-            <div className="control-group">
-                <label>Vertical Pan (Y: {panY}px)</label>
-                <input 
-                    type="range" 
-                    min={-CANVAS_H} 
-                    max={CANVAS_H} 
-                    step="10" 
-                    value={panY} 
-                    onChange={(e) => setPanY(parseInt(e.target.value))} 
-                />
-            </div>
+                <div className="control-group">
+                    <label>Horizontal Pan (X: {panX}px)</label>
+                    <input 
+                        type="range" 
+                        min={-CANVAS_W} 
+                        max={CANVAS_W} 
+                        step="10" 
+                        value={panX} 
+                        onChange={(e) => setPanX(parseInt(e.target.value))} 
+                    />
+                </div>
 
-            <div className="control-group">
-                <label>Name Text Y (Y: {textY}px)</label>
-                <input 
-                    type="range" 
-                    min="0" 
-                    max={CANVAS_H} 
-                    step="5" 
-                    value={textY} 
-                    onChange={(e) => setTextY(parseInt(e.target.value))} 
-                />
-            </div>
+                <div className="control-group">
+                    <label>Vertical Pan (Y: {panY}px)</label>
+                    <input 
+                        type="range" 
+                        min={-CANVAS_H} 
+                        max={CANVAS_H} 
+                        step="10" 
+                        value={panY} 
+                        onChange={(e) => setPanY(parseInt(e.target.value))} 
+                    />
+                </div>
+              </div>
+            )}
 
-            <div className="control-group">
-                <label>Name Text Size ({textSize}px)</label>
-                <input 
-                    type="range" 
-                    min="20" 
-                    max={150} 
-                    step="1" 
-                    value={textSize} 
-                    onChange={(e) => setTextSize(parseInt(e.target.value))} 
-                />
-            </div>
+            {activeTab === 'text' && (
+              <div className="tab-pane">
+                <h3><Sliders size={18} /> Name & Text Style</h3>
 
-            <div className="control-group">
-                <label>Name Text Color</label>
-                <input 
-                    type="color" 
-                    value={textColor} 
-                    onChange={(e) => setTextColor(e.target.value)} 
-                    style={{ width: '100%', height: '40px', cursor: 'pointer' }}
-                />
-            </div>
+                <div className="control-group">
+                    <label>Name Text Y (Y: {textY}px)</label>
+                    <input 
+                        type="range" 
+                        min="0" 
+                        max={CANVAS_H} 
+                        step="5" 
+                        value={textY} 
+                        onChange={(e) => setTextY(parseInt(e.target.value))} 
+                    />
+                </div>
 
-            <div className="control-group">
-                <label>WhatsApp Message / Caption</label>
-                <textarea 
-                    rows={4}
-                    value={caption}
-                    onChange={(e) => setCaption(e.target.value)}
-                    style={{ 
-                        width: '100%', 
-                        padding: '10px', 
-                        borderRadius: 'var(--radius-sm)', 
-                        border: '1px solid var(--border-glass)', 
-                        background: 'rgba(0,0,0,0.15)', 
-                        color: 'var(--text-primary)',
-                        resize: 'vertical',
-                        fontSize: '0.85rem',
-                        fontFamily: 'inherit',
-                        marginTop: '6px'
-                    }}
-                />
-            </div>
+                <div className="control-group">
+                    <label>Name Text Size ({textSize}px)</label>
+                    <input 
+                        type="range" 
+                        min="20" 
+                        max="150" 
+                        step="1" 
+                        value={textSize} 
+                        onChange={(e) => setTextSize(parseInt(e.target.value))} 
+                    />
+                </div>
 
-            <div className="control-group">
-                <label>Schedule Delivery Time</label>
-                <input 
-                    type="time" 
-                    value={scheduleTime} 
-                    onChange={(e) => setScheduleTime(e.target.value)} 
-                    style={{ width: '100%', padding: '10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)', background: 'rgba(0,0,0,0.15)', color: 'var(--text-primary)' }}
-                />
-            </div>
+                <div className="control-group">
+                    <label>Name Text Color</label>
+                    <input 
+                        type="color" 
+                        value={textColor} 
+                        onChange={(e) => setTextColor(e.target.value)} 
+                        style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+                    />
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'message' && (
+              <div className="tab-pane">
+                <h3><Share2 size={18} /> Caption & Delivery</h3>
+
+                <div className="control-group">
+                    <label>WhatsApp Message / Caption</label>
+                    <textarea 
+                        rows={4}
+                        value={caption}
+                        onChange={(e) => setCaption(e.target.value)}
+                        style={{ 
+                            width: '100%', 
+                            padding: '10px', 
+                            borderRadius: 'var(--radius-sm)', 
+                            border: '1px solid var(--border-glass)', 
+                            background: 'rgba(0,0,0,0.15)', 
+                            color: 'var(--text-primary)',
+                            resize: 'vertical',
+                            fontSize: '0.85rem',
+                            fontFamily: 'inherit',
+                            marginTop: '6px'
+                        }}
+                    />
+                </div>
+
+                <div className="control-group">
+                    <label>Schedule Delivery Time</label>
+                    <input 
+                        type="time" 
+                        value={scheduleTime} 
+                        onChange={(e) => setScheduleTime(e.target.value)} 
+                        style={{ width: '100%', padding: '10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)', background: 'rgba(0,0,0,0.15)', color: 'var(--text-primary)' }}
+                    />
+                </div>
+              </div>
+            )}
 
             <div className="modal-actions" style={{ marginTop: 'auto', paddingTop: '24px' }}>
               <button className="secondary-btn" onClick={onClose}>
