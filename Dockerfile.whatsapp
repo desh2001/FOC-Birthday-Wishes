@@ -5,6 +5,7 @@ ENV NODE_ENV=production
 ENV TZ=Asia/Colombo
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV BOT_DATA_DIR=/data
 
 WORKDIR /app
 
@@ -15,15 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
+
 RUN npm ci --omit=dev
 
 COPY . .
 
-RUN mkdir -p \
-    /app/.wwebjs_auth \
-    /app/.wwebjs_cache \
-    /app/scheduled-cards \
-    /app/public/img
+RUN mkdir -p /data
 
 EXPOSE 3001
 

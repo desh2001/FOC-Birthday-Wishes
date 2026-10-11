@@ -6,3 +6,9 @@ dist
 .env
 .env.*
 !.env.example
+
+.wwebjs_auth
+.wwebjs_cache
+scheduled-cards
+scheduled-cards.json
+public/img

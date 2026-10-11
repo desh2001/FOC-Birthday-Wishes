@@ -10,11 +10,17 @@ import schedule from 'node-schedule';
 import crypto from 'crypto';
 
 // Setup directories for scheduled tasks
-const CARDS_DIR = path.resolve('scheduled-cards');
-const DATA_FILE = path.resolve('scheduled-cards.json');
+const BOT_DATA_DIR = process.env.BOT_DATA_DIR;
+
+const CARDS_DIR = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, 'scheduled-cards') : path.resolve('scheduled-cards');
+const DATA_FILE = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, 'scheduled-cards.json') : path.resolve('scheduled-cards.json');
+const PUBLIC_IMG_DIR = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, 'img') : path.resolve('public', 'img');
 
 if (!fs.existsSync(CARDS_DIR)) {
     fs.mkdirSync(CARDS_DIR, { recursive: true });
+}
+if (!fs.existsSync(PUBLIC_IMG_DIR)) {
+    fs.mkdirSync(PUBLIC_IMG_DIR, { recursive: true });
 }
 if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify([]));
@@ -27,11 +33,9 @@ app.use(express.json({ limit: '10mb' })); // For base64 image payloads
 // Multer for handling multipart/form-data (file uploads)
 const upload = multer(); 
 
-// Resolve the public/img directory (relative to this script's location)
-const PUBLIC_IMG_DIR = path.resolve('public', 'img');
-
-// Serve scheduled cards static images
+// Serve scheduled cards static images and public images
 app.use('/scheduled-cards-images', express.static(CARDS_DIR)); 
+app.use('/img', express.static(PUBLIC_IMG_DIR)); 
 
 // Initialize WhatsApp client
 const client = new Client({

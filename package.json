@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "bot": "node whatsapp-bot.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
