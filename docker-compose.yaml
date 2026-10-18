@@ -1,0 +1,50 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        - VITE_BOT_URL=${VITE_BOT_URL:-/api}
+    container_name: birthday-web
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8080}:80"
+    environment:
+      - TZ=${TZ:-Asia/Colombo}
+    depends_on:
+      bot:
+        condition: service_healthy
+    networks:
+      - internal_net
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.whatsapp
+    container_name: birthday-bot
+    restart: unless-stopped
+    environment:
+      - PORT=3001
+      - BOT_DATA_DIR=/data
+      - TZ=${TZ:-Asia/Colombo}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - PUPPETEER_SKIP_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    volumes:
+      - bot_data:/data
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  internal_net:
+    driver: bridge
+
+volumes:
+  bot_data:
+    name: birthday_bot_data

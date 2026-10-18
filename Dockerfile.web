@@ -7,7 +7,7 @@ ARG VITE_BOT_URL
 ENV VITE_BOT_URL=$VITE_BOT_URL
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci || npm install
 
 COPY . .
 RUN npm run build
