@@ -129,15 +129,26 @@ const upload = multer({
 app.use('/scheduled-cards-images', express.static(CARDS_DIR)); 
 app.use('/img', express.static(PUBLIC_IMG_DIR)); 
 
-// Initialize WhatsApp client
+let isClientReady = false;
+let latestQr = null;
+let botStatusMessage = 'Launching Chromium browser and loading WhatsApp Web...';
+
+// Initialize WhatsApp client with modern browser headers and remote webVersionCache
 const client = new Client({
     authStrategy: new LocalAuth(AUTH_DIR ? { dataPath: AUTH_DIR } : {}),
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018942289-alpha.html'
+    },
     puppeteer: {
+        headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
             '--disable-gpu'
@@ -145,12 +156,10 @@ const client = new Client({
     }
 });
 
-let isClientReady = false;
-let latestQr = null;
-
 // WhatsApp event listeners
 client.on('qr', (qr) => {
     latestQr = qr;
+    botStatusMessage = 'QR code generated and waiting for scan.';
     console.log('SCAN THIS QR CODE TO LOG IN:');
     qrcode.generate(qr, { small: true });
 });
@@ -158,16 +167,36 @@ client.on('qr', (qr) => {
 client.on('ready', () => {
     console.log('✅ WhatsApp Bot is Ready and Logged In!');
     isClientReady = true;
+    botStatusMessage = 'WhatsApp is connected and logged in!';
     loadScheduledJobs();
 });
 
 client.on('authenticated', () => {
     latestQr = null;
+    botStatusMessage = 'WhatsApp authenticated successfully!';
     console.log('WhatsApp authenticated successfully!');
 });
 
+client.on('loading_screen', (percent, message) => {
+    botStatusMessage = `Loading WhatsApp Web: ${percent}% - ${message}`;
+    console.log(`⏳ ${botStatusMessage}`);
+});
+
+client.on('change_state', (state) => {
+    botStatusMessage = `WhatsApp state changed: ${state}`;
+    console.log(`🔄 ${botStatusMessage}`);
+});
+
 client.on('auth_failure', (msg) => {
+    botStatusMessage = `Authentication failure: ${msg}`;
     console.error('WhatsApp authentication failure:', msg);
+});
+
+client.on('disconnected', (reason) => {
+    botStatusMessage = `WhatsApp disconnected: ${reason}`;
+    console.warn(`⚠️ ${botStatusMessage}`);
+    isClientReady = false;
+    latestQr = null;
 });
 
 // ── Health Check Endpoint ───────────────────────────────────────────────────
@@ -175,6 +204,8 @@ app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'ok',
         whatsappReady: isClientReady,
+        botStatus: botStatusMessage,
+        hasQr: !!latestQr,
         timestamp: new Date().toISOString()
     });
 });
@@ -224,10 +255,28 @@ app.get('/qr', async (req, res) => {
         const queryKey = req.query.key ? `?key=${encodeURIComponent(req.query.key)}` : '';
         return res.send(`<!DOCTYPE html>
 <html>
-<head><title>WhatsApp QR</title><meta http-equiv="refresh" content="5;url=/qr${queryKey}"><style>body{background:#0f172a;color:#f8fafc;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;}</style></head>
+<head>
+  <title>Initializing WhatsApp</title>
+  <meta http-equiv="refresh" content="4;url=/qr${queryKey}">
+  <style>
+    body { background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; text-align: center; }
+    .card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 32px; max-width: 440px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+    h2 { margin-top: 0; color: #38bdf8; font-size: 1.4rem; }
+    .status { background: rgba(15, 23, 42, 0.7); padding: 12px 16px; border-radius: 8px; border-left: 4px solid #38bdf8; font-family: monospace; font-size: 0.9rem; margin: 16px 0; color: #e2e8f0; }
+    p { color: #94a3b8; font-size: 0.85rem; margin: 8px 0; }
+    .spinner { border: 3px solid rgba(255, 255, 255, 0.1); border-top: 3px solid #38bdf8; border-radius: 50%; width: 36px; height: 36px; animation: spin 1s linear infinite; margin: 16px auto; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .btn { display: inline-block; margin-top: 16px; padding: 8px 20px; background: #0284c7; color: #fff; text-decoration: none; border-radius: 8px; font-size: 0.85rem; }
+  </style>
+</head>
 <body>
-  <h2>⏳ Initializing WhatsApp...</h2>
-  <p style="color:#94a3b8">Please wait a few seconds. This page will refresh automatically.</p>
+  <div class="card">
+    <div class="spinner"></div>
+    <h2>⏳ Initializing WhatsApp...</h2>
+    <div class="status">${botStatusMessage}</div>
+    <p>Chromium is connecting to WhatsApp Web. The QR code will appear here automatically in a few moments.</p>
+    <a href="/qr${queryKey}" class="btn">Refresh Now</a>
+  </div>
 </body>
 </html>`);
     }
