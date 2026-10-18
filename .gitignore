@@ -7,9 +7,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Node dependencies
+node_modules/
+
+# Production builds
+dist/
+dist-ssr/
 *.local
 
 # Editor directories and files
@@ -27,14 +30,13 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+!.env.example
 
-# WhatsApp bot session data (never commit these)
+# WhatsApp bot session data & cache (never commit these)
 .wwebjs_auth/
 .wwebjs_cache/
 
-# Scheduled cards runtime data
-scheduled-cards.json
+# Runtime data & persistent storage (volume data)
+data/
 scheduled-cards/
-
-# Parsed data (generated, not source)
-parsed_birthdays.json
+scheduled-cards.json

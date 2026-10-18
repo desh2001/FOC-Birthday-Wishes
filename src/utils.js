@@ -1,6 +1,18 @@
 import { getLocalImagePath } from './data.js';
 
-export const BOT_API_URL = (import.meta.env.VITE_BOT_URL || 'http://localhost:3001').replace(/\/$/, '');
+export const BOT_API_URL = (import.meta.env.VITE_BOT_URL || '/api').replace(/\/$/, '');
+
+export function getAdminKey() {
+    return localStorage.getItem('foc_admin_key') || '';
+}
+
+export function setAdminKey(key) {
+    if (key) {
+        localStorage.setItem('foc_admin_key', key.trim());
+    } else {
+        localStorage.removeItem('foc_admin_key');
+    }
+}
 
 export function calculateCountdown(birthdayStr) {
     if (!birthdayStr) return { days: 0, text: "Unknown", isToday: false };

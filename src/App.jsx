@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Header from './components/Header';
 import StatsBar from './components/StatsBar';
 import Spotlight from './components/Spotlight';
 import Timeline from './components/Timeline';
-import ImageSync from './components/ImageSync';
 import FilterBar from './components/FilterBar';
 import StudentGrid from './components/StudentGrid';
 import AddBirthdayModal from './components/Modals/AddBirthdayModal';
@@ -11,9 +10,8 @@ import StudentDetailModal from './components/Modals/StudentDetailModal';
 import UpdatePhotoModal from './components/Modals/UpdatePhotoModal';
 import GenerateCardModal from './components/Modals/GenerateCardModal';
 import ScheduledMessagesModal from './components/Modals/ScheduledMessagesModal';
-import { db } from './firebase.js';
-import { collection, onSnapshot, addDoc } from 'firebase/firestore';
 import { BIRTHDAY_DATA } from './data.js';
+import { BOT_API_URL } from './utils.js';
 
 export default function App() {
   const [students, setStudents] = useState([]);
@@ -29,56 +27,26 @@ export default function App() {
   const [studentToUpdate, setStudentToUpdate] = useState(null);
   const [generateCardStudent, setGenerateCardStudent] = useState(null);
 
-  useEffect(() => {
-    const studentsRef = collection(db, 'students');
-    const unsubscribe = onSnapshot(studentsRef, (snapshot) => {
-      const firebaseData = [];
-      snapshot.forEach((doc) => {
-        firebaseData.push({ id: doc.id, ...doc.data() });
-      });
-
-      if (firebaseData.length === 0) {
-        if (!sessionStorage.getItem('migrated')) {
-          sessionStorage.setItem('migrated', 'true');
-          console.log("Firestore is empty! Auto-migrating records...");
-          BIRTHDAY_DATA.forEach(student => {
-            addDoc(studentsRef, student);
-          });
+  const fetchStudents = useCallback(async () => {
+    try {
+      const response = await fetch(`${BOT_API_URL}/students`);
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setStudents(data);
+          return;
         }
-        return;
       }
-      
-      // Deduplicate data
-      const uniqueMap = new Map();
-      const duplicatesToDelete = [];
-      firebaseData.forEach(student => {
-        const name = student.name ? student.name.trim().toLowerCase() : '';
-        const birthday = student.birthday ? student.birthday.trim() : '';
-        const key = name + '|' + birthday;
-        
-        if (!uniqueMap.has(key)) {
-          uniqueMap.set(key, student);
-        } else {
-          duplicatesToDelete.push(student.id);
-        }
-      });
-      
-      if (duplicatesToDelete.length > 0) {
-        console.log(`Found ${duplicatesToDelete.length} duplicates in Firestore. Cleaning up...`);
-        duplicatesToDelete.forEach(id => {
-          import('firebase/firestore').then(({ doc, deleteDoc }) => {
-            deleteDoc(doc(db, 'students', id)).catch(err => console.error(err));
-          });
-        });
-      }
-
-      setStudents(Array.from(uniqueMap.values()));
-    }, (error) => {
-      console.error("Firebase connection error:", error);
-    });
-
-    return () => unsubscribe();
+      setStudents(BIRTHDAY_DATA);
+    } catch (err) {
+      console.warn("Could not load students from bot API, using static data:", err);
+      setStudents(BIRTHDAY_DATA);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchStudents();
+  }, [fetchStudents]);
 
   // Sort students globally by next upcoming birthday
   const sortedStudents = useMemo(() => {
@@ -101,42 +69,38 @@ export default function App() {
     });
   }, [students]);
 
-  // Spotlight is the absolute next birthday
-  const spotlightStudent = sortedStudents.length > 0 ? sortedStudents[0] : null;
-  // Timeline shows the next 5 after the spotlight
-  const upcomingStudents = sortedStudents.length > 1 ? sortedStudents.slice(1, 6) : [];
+  // Spotlight student: person with birthday today or next upcoming
+  const spotlightStudent = useMemo(() => {
+    if (sortedStudents.length === 0) return null;
+    return sortedStudents[0];
+  }, [sortedStudents]);
 
+  // Upcoming students: next 5 students excluding spotlight
+  const upcomingStudents = useMemo(() => {
+    if (sortedStudents.length <= 1) return [];
+    return sortedStudents.slice(1, 6);
+  }, [sortedStudents]);
+
+  // Filter students based on search and dropdown selections
   const filteredStudents = useMemo(() => {
-    return sortedStudents.filter(student => {
-      let matchesSearch = true;
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        matchesSearch = 
-          student.name.toLowerCase().includes(query) ||
-          (student.featured_name && student.featured_name.toLowerCase().includes(query)) ||
-          student.course.toLowerCase().includes(query) ||
-          student.birthday.includes(query);
-      }
-      
-      let matchesMonth = true;
-      if (selectedMonth !== 'all') {
+    return sortedStudents.filter((student) => {
+      const matchesSearch = searchQuery === '' || 
+        student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        student.featured_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        student.whatsapp.includes(searchQuery);
+
+      const matchesMonth = selectedMonth === 'all' || (() => {
+        if (!student.birthday) return false;
         const parts = student.birthday.split('/');
-        if (parts.length === 3) {
-          // Compare as numbers to strip leading zeros
-          const m = parseInt(parts[1], 10).toString();
-          matchesMonth = m === selectedMonth;
-        }
-      }
+        if (parts.length < 2) return false;
+        return parseInt(parts[1], 10) === parseInt(selectedMonth, 10);
+      })();
 
-      let matchesCourse = true;
-      if (selectedCourse !== 'all') {
-        matchesCourse = student.course === selectedCourse;
-      }
+      const matchesCourse = selectedCourse === 'all' || 
+        (student.course && student.course.toUpperCase() === selectedCourse.toUpperCase());
 
-      let matchesGender = true;
-      if (selectedGender !== 'all') {
-        matchesGender = student.gender === selectedGender;
-      }
+      const matchesGender = selectedGender === 'all' || 
+        (student.gender && student.gender.toLowerCase() === selectedGender.toLowerCase());
       
       return matchesSearch && matchesMonth && matchesCourse && matchesGender;
     });
@@ -148,8 +112,6 @@ export default function App() {
         onAddClick={() => setIsAddModalOpen(true)} 
         onViewScheduledClick={() => setIsScheduledModalOpen(true)}
       />
-      
-      <ImageSync />
 
       <StatsBar students={students} />
       
@@ -184,7 +146,10 @@ export default function App() {
       {isAddModalOpen && (
         <AddBirthdayModal 
           onClose={() => setIsAddModalOpen(false)} 
-          onBirthdayAdded={() => setIsAddModalOpen(false)}
+          onBirthdayAdded={() => {
+            fetchStudents();
+            setIsAddModalOpen(false);
+          }}
         />
       )}
 
@@ -214,6 +179,7 @@ export default function App() {
           student={studentToUpdate}
           onClose={() => setStudentToUpdate(null)}
           onPhotoUpdated={(newUrl) => {
+            fetchStudents();
             const updated = { ...studentToUpdate, photo_url: newUrl };
             setStudentToUpdate(null);
             setSelectedStudent(updated);

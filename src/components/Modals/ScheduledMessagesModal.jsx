@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { X, CalendarClock, Trash2, AlertCircle } from 'lucide-react';
-import { BOT_API_URL } from '../../utils.js';
+import { BOT_API_URL, getAdminKey, setAdminKey } from '../../utils.js';
 
 export default function ScheduledMessagesModal({ onClose }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  useEffect(() => {
-    fetchScheduledJobs();
-  }, []);
 
   const fetchScheduledJobs = async () => {
     try {
@@ -31,13 +27,31 @@ export default function ScheduledMessagesModal({ onClose }) {
     }
   };
 
+  useEffect(() => {
+    fetchScheduledJobs();
+  }, []);
+
   const handleCancelJob = async (id) => {
     if (!window.confirm('Are you sure you want to cancel this scheduled message?')) return;
     
     try {
-      const response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}`, {
-        method: 'DELETE'
+      let adminKey = getAdminKey();
+      let response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}`, {
+        method: 'DELETE',
+        headers: { ...(adminKey && { 'x-admin-key': adminKey }) }
       });
+
+      if (response.status === 401) {
+        const enteredKey = prompt("Canceling a scheduled message requires the Admin Key. Please enter it:");
+        if (enteredKey) {
+          setAdminKey(enteredKey);
+          response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}`, {
+            method: 'DELETE',
+            headers: { 'x-admin-key': enteredKey.trim() }
+          });
+        }
+      }
+
       const data = await response.json();
       
       if (data.success) {

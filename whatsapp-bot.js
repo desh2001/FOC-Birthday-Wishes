@@ -9,13 +9,16 @@ import path from 'path';
 import schedule from 'node-schedule';
 import crypto from 'crypto';
 
-// Setup directories for scheduled tasks
+// Setup directories for scheduled tasks and persistent data
 const BOT_DATA_DIR = process.env.BOT_DATA_DIR;
 
 const CARDS_DIR = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, 'scheduled-cards') : path.resolve('scheduled-cards');
 const DATA_FILE = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, 'scheduled-cards.json') : path.resolve('scheduled-cards.json');
 const PUBLIC_IMG_DIR = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, 'img') : path.resolve('public', 'img');
+const STUDENTS_FILE = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, 'students.json') : path.resolve('students.json');
+const AUTH_DIR = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, '.wwebjs_auth') : undefined;
 
+// Ensure persistent directories exist
 if (!fs.existsSync(CARDS_DIR)) {
     fs.mkdirSync(CARDS_DIR, { recursive: true });
 }
@@ -25,29 +28,112 @@ if (!fs.existsSync(PUBLIC_IMG_DIR)) {
 if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify([]));
 }
+if (AUTH_DIR && !fs.existsSync(AUTH_DIR)) {
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+}
+
+// Copy seed images from bundled public/img into persistent PUBLIC_IMG_DIR if running with volume
+const SEED_IMG_DIR = path.resolve('public', 'img');
+if (fs.existsSync(SEED_IMG_DIR) && fs.existsSync(PUBLIC_IMG_DIR) && path.resolve(SEED_IMG_DIR) !== path.resolve(PUBLIC_IMG_DIR)) {
+    try {
+        const seedFiles = fs.readdirSync(SEED_IMG_DIR);
+        for (const file of seedFiles) {
+            const destPath = path.join(PUBLIC_IMG_DIR, file);
+            if (!fs.existsSync(destPath)) {
+                fs.copyFileSync(path.join(SEED_IMG_DIR, file), destPath);
+            }
+        }
+        console.log(`📸 Initialized local images in persistent storage.`);
+    } catch (e) {
+        console.warn(`Could not seed images to persistent volume:`, e.message);
+    }
+}
+
+// Initialize students file with seed data if it does not exist
+function getStudents() {
+    try {
+        if (!fs.existsSync(STUDENTS_FILE)) {
+            const seedPath = path.resolve('parsed_birthdays.json');
+            if (fs.existsSync(seedPath)) {
+                const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+                const initialized = seedData.map((s, idx) => ({
+                    id: s.id || `s-${idx + 1}-${crypto.randomBytes(4).toString('hex')}`,
+                    ...s
+                }));
+                fs.writeFileSync(STUDENTS_FILE, JSON.stringify(initialized, null, 2));
+                return initialized;
+            }
+            fs.writeFileSync(STUDENTS_FILE, JSON.stringify([], null, 2));
+            return [];
+        }
+        const data = fs.readFileSync(STUDENTS_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (e) {
+        console.error('Error reading students file:', e);
+        return [];
+    }
+}
+
+function saveStudents(students) {
+    fs.writeFileSync(STUDENTS_FILE, JSON.stringify(students, null, 2));
+}
+
+// Ensure students are loaded and initialized on startup
+getStudents();
+
+// Admin Authentication Setup
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY ? process.env.ADMIN_API_KEY.trim() : '';
+
+function checkAdminAuth(req) {
+    if (!ADMIN_API_KEY) return true; // Open access if no ADMIN_API_KEY is configured
+    const keyFromHeader = req.headers['x-admin-key'];
+    const authHeader = req.headers['authorization'];
+    const bearerKey = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const queryKey = req.query.key;
+    return (
+        keyFromHeader === ADMIN_API_KEY ||
+        bearerKey === ADMIN_API_KEY ||
+        queryKey === ADMIN_API_KEY
+    );
+}
+
+const requireAdmin = (req, res, next) => {
+    if (!checkAdminAuth(req)) {
+        return res.status(401).json({ 
+            success: false, 
+            message: 'Unauthorized: Valid Admin API Key required. Pass header x-admin-key or ?key=' 
+        });
+    }
+    next();
+};
 
 // Configure express app
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // For base64 image payloads
-// Multer for handling multipart/form-data (file uploads)
-const upload = multer(); 
+app.use(express.json({ limit: '15mb' })); // For base64 image payloads
+
+// Multer upload config with file limits and MIME type validation
+const upload = multer({
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB maximum
+    fileFilter: (req, file, cb) => {
+        const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (allowedMimes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Invalid file type. Only JPEG, PNG, and WebP are allowed.'));
+        }
+    }
+});
 
 // Serve scheduled cards static images and public images
 app.use('/scheduled-cards-images', express.static(CARDS_DIR)); 
 app.use('/img', express.static(PUBLIC_IMG_DIR)); 
 
-const AUTH_DIR = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, '.wwebjs_auth') : undefined;
-if (AUTH_DIR && !fs.existsSync(AUTH_DIR)) {
-    fs.mkdirSync(AUTH_DIR, { recursive: true });
-}
-
 // Initialize WhatsApp client
 const client = new Client({
     authStrategy: new LocalAuth(AUTH_DIR ? { dataPath: AUTH_DIR } : {}),
     puppeteer: {
-        executablePath:
-        process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -60,12 +146,11 @@ const client = new Client({
 });
 
 let isClientReady = false;
-let latestQr = null; // stored so /qr endpoint can serve it as an image
+let latestQr = null;
 
 // WhatsApp event listeners
 client.on('qr', (qr) => {
-    latestQr = qr; // keep for browser-based QR scanning (used by /qr endpoint)
-    // Print QR code to terminal
+    latestQr = qr;
     console.log('SCAN THIS QR CODE TO LOG IN:');
     qrcode.generate(qr, { small: true });
 });
@@ -77,42 +162,105 @@ client.on('ready', () => {
 });
 
 client.on('authenticated', () => {
-    latestQr = null; // clear QR once authenticated
+    latestQr = null;
     console.log('WhatsApp authenticated successfully!');
 });
 
-client.on('auth_failure', msg => {
+client.on('auth_failure', (msg) => {
     console.error('WhatsApp authentication failure:', msg);
 });
 
-// ── QR Code web endpoint ─────────────────────────────────────────────────────
-// Visit /qr in your browser to scan the WhatsApp QR code (useful on Render).
-// Uses qrcode npm package to render an HTML page with the QR image.
+// ── Health Check Endpoint ───────────────────────────────────────────────────
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        whatsappReady: isClientReady,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// ── QR Code Web Endpoint (Protected) ─────────────────────────────────────────
 app.get('/qr', async (req, res) => {
+    if (ADMIN_API_KEY && !checkAdminAuth(req)) {
+        return res.status(401).send(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Authentication Required</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 32px; width: 100%; max-width: 380px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); text-align: center; }
+    h2 { margin-top: 0; color: #38bdf8; font-size: 1.5rem; }
+    p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 24px; }
+    input { width: 100%; box-sizing: border-box; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(15, 23, 42, 0.6); color: #fff; font-size: 1rem; margin-bottom: 16px; }
+    button { width: 100%; padding: 12px; border-radius: 8px; border: none; background: #0284c7; color: #fff; font-weight: 600; font-size: 1rem; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #0369a1; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🔒 Admin Verification</h2>
+    <p>Please enter your Admin API Key to view and connect the WhatsApp QR code.</p>
+    <form method="GET" action="/qr">
+      <input type="password" name="key" placeholder="Enter Admin API Key" required autofocus />
+      <button type="submit">Unlock WhatsApp QR</button>
+    </form>
+  </div>
+</body>
+</html>`);
+    }
+
     if (isClientReady) {
-        return res.send('<h2 style="font-family:sans-serif;color:green">✅ WhatsApp is already connected!</h2>');
+        return res.send(`<!DOCTYPE html>
+<html>
+<head><title>WhatsApp Connected</title><style>body{background:#0f172a;color:#10b981;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;}</style></head>
+<body>
+  <h1>✅ WhatsApp is Connected!</h1>
+  <p style="color:#94a3b8">The bot is running and ready to send messages.</p>
+</body>
+</html>`);
     }
     if (!latestQr) {
-        return res.send('<h2 style="font-family:sans-serif;color:orange">⏳ QR not ready yet — wait a few seconds and refresh.</h2>');
+        const queryKey = req.query.key ? `?key=${encodeURIComponent(req.query.key)}` : '';
+        return res.send(`<!DOCTYPE html>
+<html>
+<head><title>WhatsApp QR</title><meta http-equiv="refresh" content="5;url=/qr${queryKey}"><style>body{background:#0f172a;color:#f8fafc;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;}</style></head>
+<body>
+  <h2>⏳ Initializing WhatsApp...</h2>
+  <p style="color:#94a3b8">Please wait a few seconds. This page will refresh automatically.</p>
+</body>
+</html>`);
     }
-    // Dynamically import qrcode (npm package) to generate a PNG data URL
     try {
         const QRCode = await import('qrcode');
         const qrDataUrl = await QRCode.default.toDataURL(latestQr);
+        const queryKey = req.query.key ? `?key=${encodeURIComponent(req.query.key)}` : '';
         res.send(`<!DOCTYPE html>
 <html>
-<head><title>WhatsApp QR</title><meta http-equiv="refresh" content="15"></head>
-<body style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;background:#111;color:#fff">
-  <h2>📱 Scan with WhatsApp</h2>
-  <img src="${qrDataUrl}" style="border-radius:16px;background:#fff;padding:16px;width:300px;height:300px;" />
-  <p style="opacity:.6;margin-top:12px">Page auto-refreshes every 15 seconds</p>
+<head>
+  <title>WhatsApp QR Login</title>
+  <meta http-equiv="refresh" content="15;url=/qr${queryKey}">
+  <style>
+    body { background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 32px; display: flex; flex-direction: column; align-items: center; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+    h2 { margin: 0 0 16px 0; color: #38bdf8; font-size: 1.5rem; }
+    img { border-radius: 16px; background: #fff; padding: 16px; width: 280px; height: 280px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3); }
+    p { color: #94a3b8; font-size: 0.9rem; margin-top: 16px; margin-bottom: 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>📱 Link WhatsApp Device</h2>
+    <img src="${qrDataUrl}" alt="WhatsApp QR Code" />
+    <p>Open WhatsApp on your phone &gt; Linked Devices &gt; Link a Device</p>
+    <p style="opacity: 0.6; font-size: 0.8rem; margin-top: 8px;">Auto-refreshes every 15 seconds</p>
+  </div>
 </body>
 </html>`);
     } catch (e) {
         res.status(500).send('Error generating QR: ' + e.message);
     }
 });
-// ────────────────────────────────────────────────────────────────────────────
 
 // Start WhatsApp client
 client.initialize();
@@ -125,7 +273,7 @@ function getScheduledJobs() {
     try {
         const data = fs.readFileSync(DATA_FILE, 'utf8');
         return JSON.parse(data);
-    } catch (e) {
+    } catch {
         return [];
     }
 }
@@ -151,9 +299,12 @@ async function sendScheduledMessage(jobData) {
     } catch (error) {
         console.error('❌ Error sending scheduled message:', error);
     } finally {
-        // Clean up
-        if (fs.existsSync(jobData.filePath)) {
-            fs.unlinkSync(jobData.filePath);
+        // Clean up image file safely
+        if (jobData.filePath && fs.existsSync(jobData.filePath)) {
+            const resolvedPath = path.resolve(jobData.filePath);
+            if (resolvedPath.startsWith(path.resolve(CARDS_DIR))) {
+                fs.unlinkSync(resolvedPath);
+            }
         }
         const jobs = getScheduledJobs();
         const updatedJobs = jobs.filter(j => j.id !== jobData.id);
@@ -169,10 +320,8 @@ function loadScheduledJobs() {
     for (const jobData of jobs) {
         const scheduleTime = new Date(jobData.scheduledTime);
         if (scheduleTime <= now) {
-            // Already past due, send immediately
             sendScheduledMessage(jobData);
         } else {
-            // Schedule for future
             schedule.scheduleJob(jobData.id, scheduleTime, () => {
                 sendScheduledMessage(jobData);
             });
@@ -184,8 +333,92 @@ function loadScheduledJobs() {
     }
 }
 
-// API endpoint to send message immediately
-app.post('/send-to-group', upload.single('image'), async (req, res) => {
+// ── Students Persistence API ─────────────────────────────────────────────────
+app.get('/students', (req, res) => {
+    const students = getStudents();
+    res.status(200).json(students);
+});
+
+app.post('/students', (req, res) => {
+    try {
+        const { name, featured_name, birthday, whatsapp, course, gender, photo_url, local_photo_path } = req.body;
+        if (!name || !featured_name || !birthday || !whatsapp) {
+            return res.status(400).json({ success: false, message: 'Missing required student fields.' });
+        }
+
+        const students = getStudents();
+        const newStudent = {
+            id: `s-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+            timestamp: new Date().toLocaleString('en-GB'),
+            name: String(name).trim().slice(0, 150),
+            featured_name: String(featured_name).trim().slice(0, 100),
+            birthday: String(birthday).trim().slice(0, 20),
+            whatsapp: String(whatsapp).trim().slice(0, 25),
+            course: String(course || 'SE').trim().slice(0, 20),
+            gender: String(gender || 'Male').trim().slice(0, 20),
+            photo_url: photo_url ? String(photo_url).trim() : '',
+            local_photo_path: local_photo_path ? String(local_photo_path).trim() : ''
+        };
+
+        students.push(newStudent);
+        saveStudents(students);
+        console.log(`👤 Added student: ${newStudent.featured_name}`);
+        res.status(201).json({ success: true, student: newStudent });
+    } catch (err) {
+        console.error('Error adding student:', err);
+        res.status(500).json({ success: false, message: 'Failed to add student: ' + err.message });
+    }
+});
+
+app.put('/students/:id', (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+        const students = getStudents();
+        const index = students.findIndex(s => s.id === id);
+
+        if (index === -1) {
+            return res.status(404).json({ success: false, message: 'Student not found.' });
+        }
+
+        const allowed = ['name', 'featured_name', 'birthday', 'whatsapp', 'course', 'gender', 'photo_url', 'local_photo_path'];
+        for (const key of allowed) {
+            if (updates[key] !== undefined) {
+                students[index][key] = updates[key];
+            }
+        }
+
+        saveStudents(students);
+        console.log(`🔄 Updated student: ${students[index].featured_name} (${id})`);
+        res.status(200).json({ success: true, student: students[index] });
+    } catch (err) {
+        console.error('Error updating student:', err);
+        res.status(500).json({ success: false, message: 'Failed to update student: ' + err.message });
+    }
+});
+
+app.delete('/students/:id', requireAdmin, (req, res) => {
+    try {
+        const { id } = req.params;
+        let students = getStudents();
+        const initialLen = students.length;
+        students = students.filter(s => s.id !== id);
+
+        if (students.length === initialLen) {
+            return res.status(404).json({ success: false, message: 'Student not found.' });
+        }
+
+        saveStudents(students);
+        console.log(`🗑️ Deleted student ID: ${id}`);
+        res.status(200).json({ success: true, message: 'Student deleted successfully.' });
+    } catch (err) {
+        console.error('Error deleting student:', err);
+        res.status(500).json({ success: false, message: 'Failed to delete student: ' + err.message });
+    }
+});
+
+// ── WhatsApp Messaging API (Protected by requireAdmin) ───────────────────────
+app.post('/send-to-group', requireAdmin, upload.single('image'), async (req, res) => {
     try {
         if (!isClientReady) {
             return res.status(503).json({ success: false, message: 'WhatsApp bot is not ready yet. Please wait or scan QR.' });
@@ -219,8 +452,7 @@ app.post('/send-to-group', upload.single('image'), async (req, res) => {
     }
 });
 
-// API endpoint to schedule a message
-app.post('/schedule-card', upload.single('image'), async (req, res) => {
+app.post('/schedule-card', requireAdmin, upload.single('image'), async (req, res) => {
     try {
         const { caption, targetGroup, scheduledTime } = req.body;
         const file = req.file;
@@ -234,25 +466,23 @@ app.post('/schedule-card', upload.single('image'), async (req, res) => {
              return res.status(400).json({ success: false, message: 'Invalid or past scheduled time.' });
         }
 
-        // Save image to disk
+        // Save image to disk with strict random UUID filename
         const id = crypto.randomUUID();
         const filePath = path.join(CARDS_DIR, `${id}.png`);
         fs.writeFileSync(filePath, file.buffer);
 
         const jobData = {
             id,
-            caption,
-            targetGroup,
+            caption: String(caption).slice(0, 1000),
+            targetGroup: String(targetGroup).slice(0, 100),
             scheduledTime: scheduleDate.toISOString(),
             filePath
         };
 
-        // Save to JSON
         const jobs = getScheduledJobs();
         jobs.push(jobData);
         saveScheduledJobs(jobs);
 
-        // Schedule the job
         if (isClientReady) {
             schedule.scheduleJob(id, scheduleDate, () => {
                 sendScheduledMessage(jobData);
@@ -268,22 +498,19 @@ app.post('/schedule-card', upload.single('image'), async (req, res) => {
     }
 });
 
-// API endpoint to view scheduled messages
+// View scheduled cards - returns relative image URLs
 app.get('/scheduled-cards', (req, res) => {
     try {
         const jobs = getScheduledJobs();
-        // Return jobs with the image URL mapped
         const mappedJobs = jobs.map(job => ({
             id: job.id,
             caption: job.caption,
             targetGroup: job.targetGroup,
             scheduledTime: job.scheduledTime,
-            imageUrl: `http://localhost:3001/scheduled-cards-images/${path.basename(job.filePath)}`
+            imageUrl: `/scheduled-cards-images/${path.basename(job.filePath)}`
         }));
         
-        // Sort by time ascending
         mappedJobs.sort((a, b) => new Date(a.scheduledTime) - new Date(b.scheduledTime));
-        
         res.status(200).json({ success: true, jobs: mappedJobs });
     } catch (error) {
         console.error('Error fetching scheduled messages:', error);
@@ -291,8 +518,8 @@ app.get('/scheduled-cards', (req, res) => {
     }
 });
 
-// API endpoint to delete/cancel a scheduled message
-app.delete('/scheduled-cards/:id', (req, res) => {
+// Cancel a scheduled card (Protected by requireAdmin)
+app.delete('/scheduled-cards/:id', requireAdmin, (req, res) => {
     try {
         const { id } = req.params;
         const jobs = getScheduledJobs();
@@ -304,18 +531,18 @@ app.delete('/scheduled-cards/:id', (req, res) => {
         
         const jobData = jobs[jobIndex];
         
-        // Cancel the node-schedule job if it exists
         const currentJob = schedule.scheduledJobs[id];
         if (currentJob) {
             currentJob.cancel();
         }
         
-        // Delete the image file
-        if (fs.existsSync(jobData.filePath)) {
-            fs.unlinkSync(jobData.filePath);
+        if (jobData.filePath && fs.existsSync(jobData.filePath)) {
+            const resolved = path.resolve(jobData.filePath);
+            if (resolved.startsWith(path.resolve(CARDS_DIR))) {
+                fs.unlinkSync(resolved);
+            }
         }
         
-        // Remove from JSON
         jobs.splice(jobIndex, 1);
         saveScheduledJobs(jobs);
         
@@ -327,10 +554,7 @@ app.delete('/scheduled-cards/:id', (req, res) => {
     }
 });
 
-// ── NEW: Save an uploaded profile image to public/img/ by student name ──────
-// Accepts JSON body: { base64: "data:image/jpeg;base64,...", name: "...", featured_name: "..." }
-// Saves to: public/img/{featured_name} - {name}.jpeg
-// Returns: { success: true, localPath: "/img/..." }
+// ── Save Profile Image (Protected against path traversal & payload abuse) ───
 app.post('/save-image', (req, res) => {
     try {
         const { base64, name, featured_name } = req.body;
@@ -339,26 +563,34 @@ app.post('/save-image', (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing base64, name, or featured_name.' });
         }
 
-        // Sanitize names: strip characters that are invalid in filenames
-        const sanitize = (str) => str.replace(/[\\/:*?"<>|]/g, '').trim();
-        const safeFeatured = sanitize(featured_name);
-        const safeName     = sanitize(name);
-        const fileName     = `${safeFeatured} - ${safeName}.jpeg`;
-        const filePath     = path.join(PUBLIC_IMG_DIR, fileName);
-
-        // Ensure the directory exists
-        if (!fs.existsSync(PUBLIC_IMG_DIR)) {
-            fs.mkdirSync(PUBLIC_IMG_DIR, { recursive: true });
+        if (typeof base64 !== 'string' || base64.length > 15 * 1024 * 1024) {
+            return res.status(400).json({ success: false, message: 'Invalid image format or image too large.' });
         }
 
-        // Decode base64 → Buffer
+        // Strict filename sanitization to eliminate path traversal vulnerabilities
+        const sanitize = (str) => path.basename(str).replace(/[^\w\s.-]/gi, '').trim();
+        const safeFeatured = sanitize(featured_name);
+        const safeName = sanitize(name);
+
+        if (!safeFeatured || !safeName) {
+            return res.status(400).json({ success: false, message: 'Invalid student name for image filename.' });
+        }
+
+        const fileName = `${safeFeatured} - ${safeName}.jpeg`;
+        const filePath = path.join(PUBLIC_IMG_DIR, fileName);
+
+        const resolvedPath = path.resolve(filePath);
+        if (!resolvedPath.startsWith(path.resolve(PUBLIC_IMG_DIR))) {
+            return res.status(403).json({ success: false, message: 'Forbidden: Invalid file path.' });
+        }
+
         const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
         const imageBuffer = Buffer.from(base64Data, 'base64');
 
-        fs.writeFileSync(filePath, imageBuffer);
+        fs.writeFileSync(resolvedPath, imageBuffer);
 
         const localPath = `/img/${fileName}`;
-        console.log(`📸 Saved local image: ${filePath}`);
+        console.log(`📸 Saved local image: ${resolvedPath}`);
         res.status(200).json({ success: true, localPath });
 
     } catch (error) {
@@ -366,6 +598,23 @@ app.post('/save-image', (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to save image: ' + error.message });
     }
 });
+
+// Graceful shutdown handling
+const gracefulShutdown = async (signal) => {
+    console.log(`Received ${signal}. Shutting down bot gracefully...`);
+    try {
+        if (client) {
+            await client.destroy();
+            console.log('WhatsApp client destroyed.');
+        }
+    } catch (err) {
+        console.error('Error destroying WhatsApp client:', err);
+    }
+    process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {

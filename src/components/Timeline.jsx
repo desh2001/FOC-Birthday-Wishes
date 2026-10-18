@@ -25,7 +25,7 @@ export default function Timeline({ upcomingStudents, onStudentClick }) {
           const thumbUrl = getThumbnailUrl(student);
           const countdown = calculateCountdown(student.birthday);
           
-          let daysClass = '';
+          let daysClass;
           if (countdown.isToday) daysClass = 'today';
           else if (countdown.days <= 7) daysClass = 'soon';
           else daysClass = 'far';

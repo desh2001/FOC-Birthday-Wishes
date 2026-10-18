@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { X, Download, Image as ImageIcon, Sliders, Layers, Upload, Copy, Share2, CalendarClock } from 'lucide-react';
-import { getThumbnailUrl, BOT_API_URL } from '../../utils.js';
+import { getThumbnailUrl, BOT_API_URL, getAdminKey, setAdminKey } from '../../utils.js';
 
 export default function GenerateCardModal({ student, onClose }) {
   const canvasRef = useRef(null);
@@ -238,15 +238,31 @@ export default function GenerateCardModal({ student, onClose }) {
             formData.append('caption', caption);
             formData.append('targetGroup', 'Bs');
 
-            const response = await fetch(`${BOT_API_URL}/send-to-group`, {
+            let adminKey = getAdminKey();
+            let response = await fetch(`${BOT_API_URL}/send-to-group`, {
                 method: 'POST',
+                headers: { ...(adminKey && { 'x-admin-key': adminKey }) },
                 body: formData
             });
 
-            const result = await response.json();
-            if (result.success) {
-                botSent = true;
-                alert("Successfully sent the birthday card & caption to WhatsApp group via Bot!");
+            if (response.status === 401) {
+                const enteredKey = prompt("Sending WhatsApp messages requires the Admin Key. Please enter it:");
+                if (enteredKey) {
+                    setAdminKey(enteredKey);
+                    response = await fetch(`${BOT_API_URL}/send-to-group`, {
+                        method: 'POST',
+                        headers: { 'x-admin-key': enteredKey.trim() },
+                        body: formData
+                    });
+                }
+            }
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    botSent = true;
+                    alert("Successfully sent the birthday card & caption to WhatsApp group via Bot!");
+                }
             }
         } catch (error) {
             console.log("WhatsApp Bot server not active:", error);
@@ -325,10 +341,24 @@ export default function GenerateCardModal({ student, onClose }) {
             formData.append('targetGroup', 'FOC USJ Birthdays'); 
             formData.append('scheduledTime', targetDate.toISOString());
 
-            const response = await fetch(`${BOT_API_URL}/schedule-card`, {
+            let adminKey = getAdminKey();
+            let response = await fetch(`${BOT_API_URL}/schedule-card`, {
                 method: 'POST',
+                headers: { ...(adminKey && { 'x-admin-key': adminKey }) },
                 body: formData
             });
+
+            if (response.status === 401) {
+                const enteredKey = prompt("Scheduling WhatsApp messages requires the Admin Key. Please enter it:");
+                if (enteredKey) {
+                    setAdminKey(enteredKey);
+                    response = await fetch(`${BOT_API_URL}/schedule-card`, {
+                        method: 'POST',
+                        headers: { 'x-admin-key': enteredKey.trim() },
+                        body: formData
+                    });
+                }
+            }
 
             const result = await response.json();
             
@@ -339,7 +369,7 @@ export default function GenerateCardModal({ student, onClose }) {
             }
         } catch (error) {
             console.error("Network or API error:", error);
-            alert("Could not connect to the WhatsApp Bot. Make sure it's running on port 3001.");
+            alert("Could not connect to the WhatsApp Bot API. Please ensure the bot service is running.");
         } finally {
             setIsSending(false);
         }

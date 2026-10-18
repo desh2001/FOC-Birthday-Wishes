@@ -1,9 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, User, Sparkles, Calendar as CalendarIcon, Phone, BookOpen, UserCircle, UploadCloud, Link } from 'lucide-react';
-import { collection, addDoc } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../../firebase.js';
-import { BOT_API_URL } from '../../utils.js';
+import { BOT_API_URL, getAdminKey } from '../../utils.js';
 
 export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
   const [formData, setFormData] = useState({
@@ -57,8 +54,7 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
     });
   };
 
-  // Save image to local disk via the whatsapp-bot Express server (port 3001).
-  // Silent — if the bot isn't running, this is a no-op and Firebase Storage is used instead.
+  // Save image to local disk via the whatsapp-bot Express server
   const saveImageLocally = async (base64, name, featured_name) => {
     try {
       const response = await fetch(`${BOT_API_URL}/save-image`, {
@@ -68,31 +64,12 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
       });
       if (response.ok) {
         const data = await response.json();
-        return data.localPath || null; // e.g. "/img/Pasindu - Pasindu Udana.jpeg"
+        return data.localPath || null;
       }
     } catch {
-      console.warn('Local image save skipped — whatsapp-bot server not running.');
+      console.warn('Local image save skipped — backend API not available.');
     }
     return null;
-  };
-
-  const uploadBase64ToFirebase = async (base64String, studentName) => {
-    try {
-      const byteString = atob(base64String.split(',')[1]);
-      const mimeString = base64String.split(',')[0].split(':')[1].split(';')[0];
-      const ab = new ArrayBuffer(byteString.length);
-      const ia = new Uint8Array(ab);
-      for (let i = 0; i < byteString.length; i++) {
-          ia[i] = byteString.charCodeAt(i);
-      }
-      const blob = new Blob([ab], {type: mimeString});
-      const sRef = storageRef(storage, `photos/${Date.now()}_${studentName.replace(/[^a-z0-9]/gi, '_')}.jpg`);
-      await uploadBytes(sRef, blob);
-      return await getDownloadURL(sRef);
-    } catch (err) {
-      console.warn("Firebase Storage upload fallback triggered:", err);
-      return base64String;
-    }
   };
 
   const handleChange = (e) => {
@@ -128,10 +105,8 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
     try {
       if (method === 'upload' && file) {
         const compressedBase64 = await compressImage(file);
-        // 1. Save locally to public/img/ (requires whatsapp-bot to be running)
         localPath = await saveImageLocally(compressedBase64, formData.name, formData.featured_name);
-        // 2. Upload to Firebase Storage as cloud backup
-        finalUrl = await uploadBase64ToFirebase(compressedBase64, formData.name);
+        finalUrl = localPath || '';
       } else if (method === 'url') {
         finalUrl = photoUrl.trim();
       }
@@ -141,7 +116,6 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
       const formattedBirthday = `${parts[2]}/${parts[1]}/${parts[0]}`;
 
       const newStudent = {
-        timestamp: new Date().toLocaleString('en-GB'),
         name: formData.name.trim(),
         featured_name: formData.featured_name.trim(),
         birthday: formattedBirthday,
@@ -149,16 +123,30 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
         course: formData.course,
         gender: formData.gender,
         photo_url: finalUrl,
-        ...(localPath && { local_photo_path: localPath }), // store local path if saved
+        local_photo_path: localPath || (finalUrl.startsWith('/img/') ? finalUrl : '')
       };
 
-      await addDoc(collection(db, 'students'), newStudent);
-      onBirthdayAdded();
+      const adminKey = getAdminKey();
+      const response = await fetch(`${BOT_API_URL}/students`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(adminKey && { 'x-admin-key': adminKey })
+        },
+        body: JSON.stringify(newStudent)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to save student record');
+      }
+
+      if (onBirthdayAdded) onBirthdayAdded();
       onClose();
       alert(`Successfully added ${formData.featured_name}'s birthday! 🎉`);
     } catch (err) {
       console.error('Error adding birthday:', err);
-      alert('Failed to add birthday.');
+      alert('Failed to add birthday: ' + err.message);
     }
     
     setIsSubmitting(false);
@@ -174,84 +162,134 @@ export default function AddBirthdayModal({ onClose, onBirthdayAdded }) {
           <h2>Add New Birthday</h2>
           <p className="subtitle">Register a new FOC member to the portal</p>
         </div>
-        <div className="modal-body">
-          <form onSubmit={handleSubmit} className="premium-form">
+
+        <form onSubmit={handleSubmit} className="modal-body-form">
+          <div className="form-group">
+            <label><User size={16} /> Full Name</label>
+            <input 
+              type="text" 
+              name="name" 
+              placeholder="e.g. W.D. Chamindu Sandeepa Gunathunga" 
+              value={formData.name} 
+              onChange={handleChange} 
+              required 
+            />
+          </div>
+
+          <div className="form-group">
+            <label><Sparkles size={16} /> Featured / Short Name (Shown on Cards)</label>
+            <input 
+              type="text" 
+              name="featured_name" 
+              placeholder="e.g. Chamindu Sandeepa" 
+              value={formData.featured_name} 
+              onChange={handleChange} 
+              required 
+            />
+          </div>
+
+          <div className="form-row">
             <div className="form-group">
-              <label><User size={16} className="input-icon"/> Full Name *</label>
-              <input type="text" name="name" required placeholder="e.g. Pasindu Udana Mendis" value={formData.name} onChange={handleChange} />
+              <label><CalendarIcon size={16} /> Date of Birth</label>
+              <input 
+                type="date" 
+                name="birthday" 
+                value={formData.birthday} 
+                onChange={handleChange} 
+                required 
+              />
             </div>
             <div className="form-group">
-              <label><Sparkles size={16} className="input-icon"/> Preferred/Featured Name *</label>
-              <input type="text" name="featured_name" required placeholder="e.g. Pasindu Udana" value={formData.featured_name} onChange={handleChange} />
+              <label><Phone size={16} /> WhatsApp Number</label>
+              <input 
+                type="tel" 
+                name="whatsapp" 
+                placeholder="e.g. 0771234567" 
+                value={formData.whatsapp} 
+                onChange={handleChange} 
+                required 
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label><BookOpen size={16} /> Degree Programme</label>
+              <select name="course" value={formData.course} onChange={handleChange}>
+                <option value="SE">Software Engineering (SE)</option>
+                <option value="CS">Computer Science (CS)</option>
+                <option value="IS">Information Systems (IS)</option>
+                <option value="DS">Data Science (DS)</option>
+              </select>
             </div>
             <div className="form-group">
-              <label><CalendarIcon size={16} className="input-icon"/> Date of Birth *</label>
-              <input type="date" name="birthday" required value={formData.birthday} onChange={handleChange} />
+              <label><UserCircle size={16} /> Gender</label>
+              <select name="gender" value={formData.gender} onChange={handleChange}>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+              </select>
             </div>
-            <div className="form-group">
-              <label><Phone size={16} className="input-icon"/> WhatsApp Number *</label>
-              <input type="tel" name="whatsapp" required placeholder="e.g. 0719367720" value={formData.whatsapp} onChange={handleChange} />
+          </div>
+
+          <div className="form-group photo-upload-group">
+            <label>Profile Picture</label>
+            <div className="segmented-control">
+              <button 
+                type="button" 
+                className={`segment-btn ${method === 'upload' ? 'active' : ''}`}
+                onClick={() => setMethod('upload')}
+              >
+                <UploadCloud size={16} /> Upload Image
+              </button>
+              <button 
+                type="button" 
+                className={`segment-btn ${method === 'url' ? 'active' : ''}`}
+                onClick={() => setMethod('url')}
+              >
+                <Link size={16} /> Image Link
+              </button>
             </div>
-            
-            <div className="form-row">
-              <div className="form-group half">
-                <label><BookOpen size={16} className="input-icon"/> Course</label>
-                <select name="course" value={formData.course} onChange={handleChange}>
-                  <option value="SE">Software Engineering</option>
-                  <option value="CS">Computer Science</option>
-                  <option value="IS">Information Systems</option>
-                </select>
+
+            {method === 'upload' ? (
+              <div className="file-dropzone" onClick={() => fileInputRef.current.click()}>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  accept="image/jpeg,image/png,image/webp" 
+                  style={{ display: 'none' }} 
+                  onChange={handleFileChange} 
+                />
+                {previewSrc ? (
+                  <div className="preview-container">
+                    <img src={previewSrc} alt="Preview" className="image-preview" />
+                    <span>Click to change: {fileName}</span>
+                  </div>
+                ) : (
+                  <div className="dropzone-placeholder">
+                    <UploadCloud size={32} />
+                    <span>Select an image (Max 10MB)</span>
+                  </div>
+                )}
               </div>
-              <div className="form-group half">
-                <label><UserCircle size={16} className="input-icon"/> Gender</label>
-                <select name="gender" value={formData.gender} onChange={handleChange}>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                </select>
-              </div>
-            </div>
+            ) : (
+              <input 
+                type="url" 
+                placeholder="Direct image URL or Google Drive link" 
+                value={photoUrl} 
+                onChange={(e) => setPhotoUrl(e.target.value)} 
+              />
+            )}
+          </div>
 
-            <div className="form-group photo-section">
-              <label>Profile Photo</label>
-              <div className="radio-group">
-                <label className="radio-label">
-                  <input type="radio" value="upload" checked={method === 'upload'} onChange={() => setMethod('upload')} />
-                  <span className="radio-custom"><UploadCloud size={16}/> Upload File</span>
-                </label>
-                <label className="radio-label">
-                  <input type="radio" value="url" checked={method === 'url'} onChange={() => setMethod('url')} />
-                  <span className="radio-custom"><Link size={16}/> Drive URL</span>
-                </label>
-              </div>
-
-              {method === 'upload' && (
-                <div className="form-group">
-                  <label className="file-upload-label" onClick={() => fileInputRef.current.click()}>
-                    <UploadCloud size={24} /> Select Image File
-                  </label>
-                  <input type="file" style={{ display: 'none' }} accept="image/*" ref={fileInputRef} onChange={handleFileChange} />
-                  <span className="file-name-indicator">{fileName}</span>
-                  {previewSrc && (
-                    <div className="photo-edit-preview-container" style={{ marginTop: '12px' }}>
-                      <img src={previewSrc} alt="Preview" className="photo-edit-preview" />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {method === 'url' && (
-                <div className="form-group">
-                  <label>Google Drive Link</label>
-                  <input type="url" placeholder="https://drive.google.com/open?id=..." value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} />
-                </div>
-              )}
-            </div>
-
-            <button type="submit" className="primary-btn submit-btn" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : 'Add Birthday Record'}
+          <div className="modal-actions">
+            <button type="button" className="secondary-btn" onClick={onClose} disabled={isSubmitting}>
+              Cancel
             </button>
-          </form>
-        </div>
+            <button type="submit" className="primary-btn submit-btn" disabled={isSubmitting}>
+              {isSubmitting ? 'Registering...' : 'Register Birthday'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

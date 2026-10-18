@@ -1,9 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, UploadCloud, Link } from 'lucide-react';
-import { getThumbnailUrl, BOT_API_URL } from '../../utils.js';
-import { doc, updateDoc } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../../firebase.js';
+import { getThumbnailUrl, BOT_API_URL, getAdminKey } from '../../utils.js';
 
 export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
   const [method, setMethod] = useState('upload');
@@ -52,8 +49,7 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
     });
   };
 
-  // Save image to local disk via the whatsapp-bot Express server (port 3001).
-  // Silent — if the bot isn't running, this is a no-op and Firebase Storage is used instead.
+  // Save image to local disk via the whatsapp-bot Express server
   const saveImageLocally = async (base64, name, featured_name) => {
     try {
       const response = await fetch(`${BOT_API_URL}/save-image`, {
@@ -66,28 +62,9 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
         return data.localPath || null;
       }
     } catch {
-      console.warn('Local image save skipped — whatsapp-bot server not running.');
+      console.warn('Local image save skipped — backend API not available.');
     }
     return null;
-  };
-
-  const uploadBase64ToFirebase = async (base64String, studentName) => {
-    try {
-      const byteString = atob(base64String.split(',')[1]);
-      const mimeString = base64String.split(',')[0].split(':')[1].split(';')[0];
-      const ab = new ArrayBuffer(byteString.length);
-      const ia = new Uint8Array(ab);
-      for (let i = 0; i < byteString.length; i++) {
-          ia[i] = byteString.charCodeAt(i);
-      }
-      const blob = new Blob([ab], {type: mimeString});
-      const sRef = storageRef(storage, `photos/${Date.now()}_${studentName.replace(/[^a-z0-9]/gi, '_')}.jpg`);
-      await uploadBytes(sRef, blob);
-      return await getDownloadURL(sRef);
-    } catch (err) {
-      console.warn("Firebase Storage upload fallback triggered:", err);
-      return base64String;
-    }
   };
 
   const handleFileChange = (e) => {
@@ -95,7 +72,6 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
       const selected = e.target.files[0];
       setFile(selected);
       setFileName(selected.name);
-      // Instantly preview the chosen file before any upload
       const reader = new FileReader();
       reader.onload = (ev) => setPreviewSrc(ev.target.result);
       reader.readAsDataURL(selected);
@@ -110,7 +86,7 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
     e.preventDefault();
     setIsSubmitting(true);
 
-    let finalUrl = '';
+    let finalUrl;
     let localPath = null;
     try {
       if (method === 'upload') {
@@ -120,10 +96,8 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
           return;
         }
         const compressedBase64 = await compressImage(file);
-        // 1. Save locally to public/img/ (requires whatsapp-bot to be running)
         localPath = await saveImageLocally(compressedBase64, student.name, student.featured_name);
-        // 2. Upload to Firebase Storage as cloud backup
-        finalUrl = await uploadBase64ToFirebase(compressedBase64, student.name);
+        finalUrl = localPath || '';
       } else {
         finalUrl = photoUrl.trim();
         if (!finalUrl) {
@@ -133,22 +107,29 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
         }
       }
 
-      // Update Firestore
-      if (student.id) {
-        const studentDocRef = doc(db, 'students', student.id);
-        await updateDoc(studentDocRef, {
+      const adminKey = getAdminKey();
+      const response = await fetch(`${BOT_API_URL}/students/${student.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(adminKey && { 'x-admin-key': adminKey })
+        },
+        body: JSON.stringify({
           photo_url: finalUrl,
-          ...(localPath && { local_photo_path: localPath }), // store local path if saved
-        });
-      } else {
-        alert('Cannot update photo because this student record is not properly synced to Firebase yet.');
+          local_photo_path: localPath || (finalUrl.startsWith('/img/') ? finalUrl : null)
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to update student photo');
       }
 
       onPhotoUpdated(finalUrl);
       onClose();
     } catch (err) {
       console.error('Error updating photo:', err);
-      alert('Failed to update photo.');
+      alert('Failed to update photo: ' + err.message);
     }
     setIsSubmitting(false);
   };
@@ -160,58 +141,80 @@ export default function UpdatePhotoModal({ student, onClose, onPhotoUpdated }) {
       <div className="modal-content">
         <button className="close-modal" onClick={onClose}><X size={24} /></button>
         <div className="modal-header">
-          <h2>Update Profile Photo</h2>
-          <p className="subtitle">Upload a new image or link a Google Drive photo</p>
+          <h2>Update Photo</h2>
+          <p className="subtitle">Change profile picture for {student.featured_name}</p>
         </div>
-        <div className="modal-body">
-          <div className="photo-edit-preview-container">
-            <img 
-              src={previewSrc || thumbUrl} 
-              alt="Preview" 
-              className="photo-edit-preview" 
-              onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120"; }}
-            />
-            <h3 id="photo-edit-name">{student.featured_name}</h3>
-            {previewSrc && (
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-accent)', marginTop: '4px', fontWeight: 600 }}>
-                ✓ New photo selected
-              </p>
-            )}
-          </div>
-          <form onSubmit={handleSubmit} className="premium-form">
-            <div className="form-group radio-group">
-              <label className="radio-label">
-                <input type="radio" value="upload" checked={method === 'upload'} onChange={() => setMethod('upload')} />
-                <span className="radio-custom"><UploadCloud size={16}/> Upload File</span>
-              </label>
-              <label className="radio-label">
-                <input type="radio" value="url" checked={method === 'url'} onChange={() => setMethod('url')} />
-                <span className="radio-custom"><Link size={16}/> Drive URL</span>
-              </label>
+
+        <div className="current-photo-preview" style={{ textAlign: 'center', marginBottom: '20px' }}>
+          <img 
+            src={previewSrc || thumbUrl} 
+            alt="Current" 
+            style={{ width: '100px', height: '100px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--accent-primary)' }}
+            onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120"; }}
+          />
+          <p style={{ fontSize: '0.8rem', opacity: 0.7, marginTop: '5px' }}>
+            {previewSrc ? 'New Image Preview' : 'Current Photo'}
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="modal-body-form">
+          <div className="form-group photo-upload-group">
+            <div className="segmented-control">
+              <button 
+                type="button" 
+                className={`segment-btn ${method === 'upload' ? 'active' : ''}`}
+                onClick={() => setMethod('upload')}
+              >
+                <UploadCloud size={16} /> Upload New Image
+              </button>
+              <button 
+                type="button" 
+                className={`segment-btn ${method === 'url' ? 'active' : ''}`}
+                onClick={() => setMethod('url')}
+              >
+                <Link size={16} /> Image Link
+              </button>
             </div>
 
-            {method === 'upload' && (
-              <div className="form-group">
-                <label className="file-upload-label" onClick={() => fileInputRef.current.click()}>
-                  <UploadCloud size={24} /> Select Image File
-                </label>
-                <input type="file" style={{ display: 'none' }} accept="image/*" ref={fileInputRef} onChange={handleFileChange} />
-                <span className="file-name-indicator">{fileName}</span>
+            {method === 'upload' ? (
+              <div className="file-dropzone" onClick={() => fileInputRef.current.click()}>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  accept="image/jpeg,image/png,image/webp" 
+                  style={{ display: 'none' }} 
+                  onChange={handleFileChange} 
+                />
+                {previewSrc ? (
+                  <div className="preview-container">
+                    <span>Click to change: {fileName}</span>
+                  </div>
+                ) : (
+                  <div className="dropzone-placeholder">
+                    <UploadCloud size={32} />
+                    <span>Select an image (Max 10MB)</span>
+                  </div>
+                )}
               </div>
+            ) : (
+              <input 
+                type="url" 
+                placeholder="Direct image URL or Google Drive link" 
+                value={photoUrl} 
+                onChange={(e) => setPhotoUrl(e.target.value)} 
+              />
             )}
+          </div>
 
-            {method === 'url' && (
-              <div className="form-group">
-                <label>Google Drive Link</label>
-                <input type="url" placeholder="https://drive.google.com/open?id=..." value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} />
-              </div>
-            )}
-
-            <button type="submit" className="primary-btn submit-btn" style={{ width: '100%', marginTop: '16px' }} disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : 'Save Changes'}
+          <div className="modal-actions">
+            <button type="button" className="secondary-btn" onClick={onClose} disabled={isSubmitting}>
+              Cancel
             </button>
-          </form>
-        </div>
+            <button type="submit" className="primary-btn submit-btn" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : 'Save Photo'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
