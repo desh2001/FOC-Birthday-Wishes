@@ -1,0 +1,34 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.whatsapp
+    container_name: birthday-bot
+    restart: unless-stopped
+    environment:
+      - PORT=3001
+      - BOT_DATA_DIR=/data
+      - TZ=Asia/Colombo
+      - PUPPETEER_SKIP_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    volumes:
+      - bot_data:/data
+    ports:
+      - "3001:3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        - VITE_BOT_URL=${VITE_BOT_URL:-http://localhost:3001}
+    container_name: birthday-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - bot
+
+volumes:
+  bot_data:
+    driver: local

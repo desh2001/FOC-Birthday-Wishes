@@ -37,9 +37,14 @@ const upload = multer();
 app.use('/scheduled-cards-images', express.static(CARDS_DIR)); 
 app.use('/img', express.static(PUBLIC_IMG_DIR)); 
 
+const AUTH_DIR = BOT_DATA_DIR ? path.join(BOT_DATA_DIR, '.wwebjs_auth') : undefined;
+if (AUTH_DIR && !fs.existsSync(AUTH_DIR)) {
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+}
+
 // Initialize WhatsApp client
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth(AUTH_DIR ? { dataPath: AUTH_DIR } : {}),
     puppeteer: {
         executablePath:
         process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -48,7 +53,8 @@ const client = new Client({
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--no-first-run',
-            '--no-zygote'
+            '--no-zygote',
+            '--disable-gpu'
         ]
     }
 });
@@ -361,8 +367,8 @@ app.post('/save-image', (req, res) => {
     }
 });
 
-const PORT = 3001;
-app.listen(PORT, () => {
-    console.log(`🚀 Express API running on http://localhost:${PORT}`);
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Express API running on http://0.0.0.0:${PORT}`);
     console.log(`Waiting for WhatsApp client to initialize...`);
 });
