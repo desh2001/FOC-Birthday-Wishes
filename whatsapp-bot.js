@@ -262,8 +262,7 @@ app.get('/qr', async (req, res) => {
     }
 });
 
-// Start WhatsApp client
-client.initialize();
+// Scheduled jobs persistence helpers
 
 function saveScheduledJobs(jobs) {
     fs.writeFileSync(DATA_FILE, JSON.stringify(jobs, null, 2));
@@ -620,4 +619,7 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Express API running on http://0.0.0.0:${PORT}`);
     console.log(`Waiting for WhatsApp client to initialize...`);
+    client.initialize().catch((err) => {
+        console.error('❌ WhatsApp client initialization error:', err);
+    });
 });

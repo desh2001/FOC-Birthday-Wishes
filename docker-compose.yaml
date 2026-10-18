@@ -8,12 +8,11 @@ services:
     container_name: birthday-web
     restart: unless-stopped
     ports:
-      - "${HOST_PORT:-8080}:80"
+      - "${HOST_PORT:-8085}:80"
     environment:
       - TZ=${TZ:-Asia/Colombo}
     depends_on:
-      bot:
-        condition: service_healthy
+      - bot
     networks:
       - internal_net
 
@@ -34,12 +33,6 @@ services:
       - bot_data:/data
     networks:
       - internal_net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
 
 networks:
   internal_net:
