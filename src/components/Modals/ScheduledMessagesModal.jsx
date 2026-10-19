@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, CalendarClock, Trash2, AlertCircle, Send } from 'lucide-react';
+import { X, CalendarClock, Trash2, AlertCircle, Send, Edit2, Check } from 'lucide-react';
 import { BOT_API_URL, getAdminKey, setAdminKey } from '../../utils.js';
 
 export default function ScheduledMessagesModal({ onClose }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [editingJobId, setEditingJobId] = useState(null);
+  const [editGroupValue, setEditGroupValue] = useState('');
+  const [savingGroupId, setSavingGroupId] = useState(null);
 
   const fetchScheduledJobs = async () => {
     try {
@@ -27,9 +31,66 @@ export default function ScheduledMessagesModal({ onClose }) {
     }
   };
 
+  const fetchGroups = async () => {
+    try {
+      const response = await fetch(`${BOT_API_URL}/groups`);
+      const data = await response.json();
+      if (data.success && Array.isArray(data.groups)) {
+        setGroups(data.groups);
+      }
+    } catch (e) {
+      console.warn("Could not load groups list in modal:", e);
+    }
+  };
+
   useEffect(() => {
     fetchScheduledJobs();
+    fetchGroups();
   }, []);
+
+  const handleUpdateTargetGroup = async (id, newGroup) => {
+    if (!newGroup || !newGroup.trim()) return;
+    try {
+      setSavingGroupId(id);
+      let adminKey = getAdminKey();
+      let response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}/target-group`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(adminKey && { 'x-admin-key': adminKey }) 
+        },
+        body: JSON.stringify({ targetGroup: newGroup.trim() })
+      });
+
+      if (response.status === 401) {
+        const enteredKey = prompt("Updating requires Admin Key. Please enter it:");
+        if (enteredKey) {
+          setAdminKey(enteredKey);
+          response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}/target-group`, {
+            method: 'PUT',
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-admin-key': enteredKey.trim() 
+            },
+            body: JSON.stringify({ targetGroup: newGroup.trim() })
+          });
+        }
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        setJobs(jobs.map(j => j.id === id ? { ...j, targetGroup: newGroup.trim() } : j));
+        setEditingJobId(null);
+      } else {
+        alert(`Failed to update group: ${data.message}`);
+      }
+    } catch (err) {
+      console.error("Error updating target group:", err);
+      alert("Network error: Could not update target group.");
+    } finally {
+      setSavingGroupId(null);
+    }
+  };
 
   const handleCancelJob = async (id) => {
     if (!window.confirm('Are you sure you want to cancel this scheduled message?')) return;
@@ -55,7 +116,6 @@ export default function ScheduledMessagesModal({ onClose }) {
       const data = await response.json();
       
       if (data.success) {
-        // Remove from list immediately
         setJobs(jobs.filter(job => job.id !== id));
       } else {
         alert(`Failed to cancel: ${data.message}`);
@@ -68,8 +128,10 @@ export default function ScheduledMessagesModal({ onClose }) {
 
   const [sendingId, setSendingId] = useState(null);
 
-  const handleSendNow = async (id) => {
-    if (!window.confirm('Send this card to the WhatsApp group right now?')) return;
+  const handleSendNow = async (id, targetGroupName) => {
+    const job = jobs.find(j => j.id === id);
+    const groupToUse = targetGroupName || (job ? job.targetGroup : 'group');
+    if (!window.confirm(`Send this card to WhatsApp group "${groupToUse}" right now?`)) return;
     try {
       setSendingId(id);
       let adminKey = getAdminKey();
@@ -94,7 +156,21 @@ export default function ScheduledMessagesModal({ onClose }) {
         alert(data.message || 'Card sent to group successfully!');
         setJobs(jobs.filter(job => job.id !== id));
       } else {
-        alert(`Failed to send: ${data.message}`);
+        // If the group was not found and we have the list of detected groups, help the user pick
+        if (data.availableGroups && data.availableGroups.length > 0) {
+          const groupNames = data.availableGroups.map(g => `• ${g.name}`).join('\n');
+          const chosen = prompt(
+            `${data.message}\n\nAvailable WhatsApp Groups on your phone:\n${groupNames}\n\nEnter the correct group name to update and send now:`,
+            data.availableGroups[0]?.name || ''
+          );
+          if (chosen && chosen.trim()) {
+            await handleUpdateTargetGroup(id, chosen.trim());
+            // Retry send immediately with the new group
+            return handleSendNow(id, chosen.trim());
+          }
+        } else {
+          alert(`Failed to send: ${data.message}`);
+        }
       }
     } catch (err) {
       console.error("Error sending card now:", err);
@@ -173,9 +249,90 @@ export default function ScheduledMessagesModal({ onClose }) {
                             </div>
                             
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)' }}>
-                                    Target Group: <span style={{ color: 'var(--color-accent)' }}>{job.targetGroup}</span>
-                                </h3>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', margin: 0 }}>
+                                        Target Group:
+                                    </h3>
+                                    {editingJobId === job.id ? (
+                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                            <input
+                                                type="text"
+                                                list="modal-groups-list"
+                                                value={editGroupValue}
+                                                onChange={(e) => setEditGroupValue(e.target.value)}
+                                                placeholder="Select or enter group name..."
+                                                style={{
+                                                    background: 'rgba(0,0,0,0.5)',
+                                                    border: '1px solid var(--color-accent)',
+                                                    borderRadius: '6px',
+                                                    padding: '4px 10px',
+                                                    color: '#fff',
+                                                    fontSize: '0.9rem',
+                                                    minWidth: '180px'
+                                                }}
+                                                autoFocus
+                                            />
+                                            <button
+                                                onClick={() => handleUpdateTargetGroup(job.id, editGroupValue)}
+                                                disabled={savingGroupId === job.id}
+                                                title="Save Group"
+                                                style={{
+                                                    background: 'rgba(16, 185, 129, 0.2)',
+                                                    border: '1px solid #10B981',
+                                                    color: '#10B981',
+                                                    borderRadius: '6px',
+                                                    padding: '6px 8px',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center'
+                                                }}
+                                            >
+                                                <Check size={14} />
+                                            </button>
+                                            <button
+                                                onClick={() => setEditingJobId(null)}
+                                                title="Cancel Edit"
+                                                style={{
+                                                    background: 'rgba(239, 68, 68, 0.2)',
+                                                    border: '1px solid #ef4444',
+                                                    color: '#ef4444',
+                                                    borderRadius: '6px',
+                                                    padding: '6px 8px',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center'
+                                                }}
+                                            >
+                                                <X size={14} />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                            <span style={{ color: 'var(--color-accent)', fontWeight: 'bold' }}>{job.targetGroup}</span>
+                                            <button
+                                                onClick={() => {
+                                                    setEditingJobId(job.id);
+                                                    setEditGroupValue(job.targetGroup);
+                                                }}
+                                                title="Change Target WhatsApp Group"
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.06)',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: '4px',
+                                                    color: 'var(--text-secondary)',
+                                                    cursor: 'pointer',
+                                                    padding: '3px 6px',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px',
+                                                    fontSize: '0.75rem'
+                                                }}
+                                            >
+                                                <Edit2 size={12} /> Edit
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                                 
                                 <div style={{ 
                                     display: 'inline-flex', 
@@ -259,6 +416,14 @@ export default function ScheduledMessagesModal({ onClose }) {
                 </div>
             )}
         </div>
+        
+        <datalist id="modal-groups-list">
+          {groups.map(g => (
+            <option key={g.id} value={g.name}>
+              {g.name}
+            </option>
+          ))}
+        </datalist>
       </div>
     </div>
   );

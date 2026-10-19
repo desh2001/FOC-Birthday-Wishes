@@ -208,10 +208,41 @@ function createClient() {
         qrcode.generate(qr, { small: true });
     });
 
-    newClient.on('ready', () => {
+    newClient.on('ready', async () => {
         console.log('✅ WhatsApp Bot is Ready and Logged In!');
         isClientReady = true;
         botStatusMessage = 'WhatsApp is connected and logged in!';
+
+        // Apply safety patch to WWebJS.getChatModel to prevent groupMetadata.update errors
+        try {
+            if (newClient.pupPage) {
+                await newClient.pupPage.evaluate(() => {
+                    if (window.WWebJS && window.WWebJS.getChatModel) {
+                        const original = window.WWebJS.getChatModel;
+                        window.WWebJS.getChatModel = async function(chat, options) {
+                            try {
+                                return await original(chat, options);
+                            } catch {
+                                try {
+                                    const model = chat.serialize ? chat.serialize() : { id: chat.id };
+                                    model.name = chat.name || chat.formattedTitle;
+                                    model.formattedTitle = chat.formattedTitle;
+                                    model.isGroup = !!(chat.isGroup || chat.groupMetadata || (chat.id?._serialized && chat.id._serialized.endsWith('@g.us')));
+                                    return model;
+                                } catch {
+                                    return null;
+                                }
+                            }
+                        };
+                        window.WWebJS.__safePatched = true;
+                    }
+                });
+                console.log('🛡️ Applied WhatsApp Web chat model safety patch.');
+            }
+        } catch (e) {
+            console.warn('Note on applying chat model patch:', e.message);
+        }
+
         loadScheduledJobs();
     });
 
@@ -438,61 +469,181 @@ function getScheduledJobs() {
     }
 }
 
-async function findGroupChat(target) {
-    if (!client || !target) return null;
-    const cleanTarget = String(target).trim().toLowerCase();
+async function getSafeGroupChats() {
+    if (!client) return [];
 
+    const normalizeGroup = (id, name) => {
+        if (!id) return null;
+        const serializedId = typeof id === 'object' ? (id._serialized || (id.user && id.server ? `${id.user}@${id.server}` : '')) : String(id);
+        if (!serializedId) return null;
+        const cleanName = String(name || '').trim();
+        return {
+            id: serializedId,
+            name: cleanName || serializedId
+        };
+    };
+
+    // 1. Ensure the safety patch is active on pupPage
+    if (client.pupPage) {
+        try {
+            await client.pupPage.evaluate(() => {
+                if (window.WWebJS && window.WWebJS.getChatModel && !window.WWebJS.__safePatched) {
+                    const original = window.WWebJS.getChatModel;
+                    window.WWebJS.getChatModel = async function(chat, options) {
+                        try {
+                            return await original(chat, options);
+                        } catch {
+                            try {
+                                const model = chat.serialize ? chat.serialize() : { id: chat.id };
+                                model.name = chat.name || chat.formattedTitle;
+                                model.formattedTitle = chat.formattedTitle;
+                                model.isGroup = !!(chat.isGroup || chat.groupMetadata || (chat.id?._serialized && chat.id._serialized.endsWith('@g.us')));
+                                return model;
+                            } catch {
+                                return null;
+                            }
+                        }
+                    };
+                    window.WWebJS.__safePatched = true;
+                }
+            });
+        } catch {}
+    }
+
+    // 2. Attempt standard client.getChats()
     try {
         const chats = await client.getChats();
-        const groupChats = chats.filter(c => c.isGroup || c.id?._serialized?.endsWith('@g.us'));
-
-        console.log(`📋 WhatsApp Bot sees ${groupChats.length} groups: [${groupChats.map(g => `"${g.name}"`).join(', ')}]`);
-
-        // 1. Direct serialized ID match (e.g. 120363023456@g.us)
-        let found = groupChats.find(c => c.id?._serialized === target.trim());
-        if (found) return found;
-
-        // 2. Exact match (case-insensitive & trimmed)
-        found = groupChats.find(c => (c.name || '').trim().toLowerCase() === cleanTarget);
-        if (found) return found;
-
-        // 3. Partial match (case-insensitive contains)
-        found = groupChats.find(c => (c.name || '').toLowerCase().includes(cleanTarget));
-        if (found) return found;
-
-        // 4. Reverse partial match (target contains group name)
-        found = groupChats.find(c => c.name && cleanTarget.includes(c.name.trim().toLowerCase()));
-        if (found) return found;
-
-        console.warn(`❌ Could not find group matching "${target}". Available groups:`, groupChats.map(g => g.name));
-        return null;
+        if (Array.isArray(chats) && chats.length > 0) {
+            const groups = chats
+                .filter(c => c && (c.isGroup || c.id?._serialized?.endsWith('@g.us')))
+                .map(c => normalizeGroup(c.id?._serialized || c.id, c.name || c.formattedTitle))
+                .filter(Boolean);
+            if (groups.length > 0) {
+                return groups;
+            }
+        }
     } catch (err) {
-        console.error('Error in findGroupChat:', err);
-        return null;
+        console.warn('⚠️ Standard client.getChats() error, falling back to Store evaluation:', err.message);
     }
+
+    // 3. Fallback: Query WhatsApp Web Store directly via Puppeteer page evaluation
+    if (client.pupPage) {
+        try {
+            const rawGroups = await client.pupPage.evaluate(() => {
+                try {
+                    const getCol = () => {
+                        if (window.Store && window.Store.Chat) return window.Store.Chat;
+                        if (typeof window.require === 'function') {
+                            try { return window.require('WAWebCollections').Chat; } catch {}
+                            try { return window.require('WAWebChatCollection').Chat; } catch {}
+                        }
+                        return null;
+                    };
+                    const col = getCol();
+                    if (!col || !col.getModelsArray) return [];
+                    return col.getModelsArray()
+                        .filter(c => {
+                            const sid = c?.id?._serialized || (typeof c?.id === 'string' ? c.id : '');
+                            return c?.isGroup || sid.endsWith('@g.us') || !!c?.groupMetadata;
+                        })
+                        .map(c => ({
+                            id: c?.id?._serialized || (typeof c?.id === 'string' ? c.id : ''),
+                            name: c?.name || c?.formattedTitle || c?.contact?.name || ''
+                        }));
+                } catch {
+                    return [];
+                }
+            });
+
+            if (Array.isArray(rawGroups) && rawGroups.length > 0) {
+                const groups = rawGroups
+                    .map(g => normalizeGroup(g.id, g.name))
+                    .filter(Boolean);
+                if (groups.length > 0) {
+                    console.log(`📦 Fallback store query retrieved ${groups.length} groups.`);
+                    return groups;
+                }
+            }
+        } catch (evalErr) {
+            console.error('Error during fallback Store evaluation:', evalErr.message);
+        }
+    }
+
+    return [];
+}
+
+async function findGroupChat(target) {
+    if (!client || !target) return { group: null, error: 'WhatsApp client is not ready or target is empty.', availableGroups: [] };
+    const cleanTarget = String(target).trim().toLowerCase();
+
+    const groups = await getSafeGroupChats();
+    console.log(`📋 WhatsApp Bot sees ${groups.length} groups: [${groups.map(g => `"${g.name}"`).join(', ')}]`);
+
+    if (groups.length === 0) {
+        return {
+            group: null,
+            availableGroups: [],
+            error: 'No WhatsApp groups could be loaded from your WhatsApp session. Please ensure your WhatsApp account is in groups and has synced messages.'
+        };
+    }
+
+    // 1. Direct serialized ID match (e.g. 120363023456@g.us)
+    let found = groups.find(g => g.id.toLowerCase() === cleanTarget);
+    if (found) return { group: found, availableGroups: groups };
+
+    // 2. Exact match (case-insensitive & trimmed)
+    found = groups.find(g => (g.name || '').trim().toLowerCase() === cleanTarget);
+    if (found) return { group: found, availableGroups: groups };
+
+    // 3. Partial match (group name contains target, e.g. "Bs" inside "Bs Group")
+    found = groups.find(g => (g.name || '').toLowerCase().includes(cleanTarget));
+    if (found) return { group: found, availableGroups: groups };
+
+    // 4. Reverse partial match (target contains group name)
+    found = groups.find(g => g.name && cleanTarget.includes(g.name.trim().toLowerCase()));
+    if (found) return { group: found, availableGroups: groups };
+
+    const availableNames = groups.map(g => `"${g.name}"`).slice(0, 10).join(', ');
+    return {
+        group: null,
+        availableGroups: groups,
+        error: `Could not find group matching "${target}". Available groups (${groups.length}): [${availableNames}${groups.length > 10 ? ', ...' : ''}]`
+    };
 }
 
 async function sendScheduledMessage(jobData) {
     let success = false;
+    let failureReason = '';
+    let targetId = '';
+    let targetName = '';
+
     try {
         console.log(`Executing scheduled job for "${jobData.targetGroup}"...`);
         if (!fs.existsSync(jobData.filePath)) {
-            console.error(`File missing for scheduled job: ${jobData.filePath}`);
-            return false;
+            failureReason = `File missing for scheduled job: ${jobData.filePath}`;
+            console.error(failureReason);
+            return { success: false, error: failureReason };
         }
 
-        const groupChat = await findGroupChat(jobData.targetGroup);
+        const match = await findGroupChat(jobData.targetGroup);
 
-        if (groupChat) {
+        if (match.group) {
+            targetId = match.group.id;
+            targetName = match.group.name;
             const media = MessageMedia.fromFilePath(jobData.filePath);
-            await client.sendMessage(groupChat.id._serialized, media, { caption: jobData.caption });
-            console.log(`✅ Scheduled card successfully sent to group: "${groupChat.name}" (${groupChat.id._serialized})`);
+            await client.sendMessage(targetId, media, { caption: jobData.caption });
+            console.log(`✅ Scheduled card successfully sent to group: "${targetName}" (${targetId})`);
             success = true;
+            return { success: true, groupName: targetName, groupId: targetId };
         } else {
-            console.error(`❌ Could not find group "${jobData.targetGroup}" to send scheduled message.`);
+            failureReason = match.error || `Could not find group "${jobData.targetGroup}".`;
+            console.error(`❌ ${failureReason}`);
+            return { success: false, error: failureReason, availableGroups: match.availableGroups || [] };
         }
     } catch (error) {
+        failureReason = error.message;
         console.error('❌ Error sending scheduled message:', error);
+        return { success: false, error: failureReason };
     } finally {
         if (success) {
             // Clean up image file only when message was actually sent
@@ -507,7 +658,6 @@ async function sendScheduledMessage(jobData) {
             saveScheduledJobs(updatedJobs);
         }
     }
-    return success;
 }
 
 function loadScheduledJobs() {
@@ -629,19 +779,23 @@ app.post('/send-to-group', requireAdmin, upload.single('image'), async (req, res
             return res.status(400).json({ success: false, message: 'Missing caption, targetGroup, or image file.' });
         }
 
-        const groupChat = await findGroupChat(targetGroup);
+        const match = await findGroupChat(targetGroup);
 
-        if (!groupChat) {
-            return res.status(404).json({ success: false, message: `Could not find a group matching "${targetGroup}". Please check your WhatsApp group name exactly.` });
+        if (!match.group) {
+            return res.status(404).json({ 
+                success: false, 
+                message: match.error || `Could not find a group matching "${targetGroup}".`,
+                availableGroups: match.availableGroups || []
+            });
         }
 
         const base64Image = file.buffer.toString('base64');
         const media = new MessageMedia(file.mimetype, base64Image, 'birthday_card.png');
 
-        await client.sendMessage(groupChat.id._serialized, media, { caption: caption });
+        await client.sendMessage(match.group.id, media, { caption: caption });
         
-        console.log(`✅ Successfully sent card to group: "${groupChat.name}" (${groupChat.id._serialized})`);
-        res.status(200).json({ success: true, message: `Message sent successfully to ${groupChat.name}!` });
+        console.log(`✅ Successfully sent card to group: "${match.group.name}" (${match.group.id})`);
+        res.status(200).json({ success: true, message: `Message sent successfully to ${match.group.name}!` });
 
     } catch (error) {
         console.error('Error sending message:', error);
@@ -655,17 +809,11 @@ app.get('/groups', async (req, res) => {
         if (!isClientReady || !client) {
             return res.status(503).json({ success: false, message: 'WhatsApp bot is not ready yet.' });
         }
-        const chats = await client.getChats();
-        const groups = chats
-            .filter(c => c.isGroup || c.id?._serialized?.endsWith('@g.us'))
-            .map(c => ({
-                id: c.id._serialized,
-                name: c.name || c.formattedTitle || 'Unnamed Group'
-            }));
+        const groups = await getSafeGroupChats();
         res.status(200).json({ success: true, groups });
     } catch (err) {
         console.error('Error fetching groups:', err);
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({ success: false, message: err.message, groups: [] });
     }
 });
 
@@ -790,15 +938,41 @@ app.post('/scheduled-cards/:id/send-now', requireAdmin, async (req, res) => {
         }
 
         console.log(`🚀 Manually triggering scheduled card ${id} for group "${job.targetGroup}"`);
-        const success = await sendScheduledMessage(job);
-        if (success) {
-            res.status(200).json({ success: true, message: `Card successfully sent to ${job.targetGroup}!` });
+        const result = await sendScheduledMessage(job);
+        if (result && result.success) {
+            res.status(200).json({ success: true, message: `Card successfully sent to ${result.groupName || job.targetGroup}!` });
         } else {
-            res.status(500).json({ success: false, message: `Could not send to group "${job.targetGroup}". Please check if the bot is in this group.` });
+            res.status(500).json({ 
+                success: false, 
+                message: (result && result.error) || `Could not send to group "${job.targetGroup}".`,
+                availableGroups: (result && result.availableGroups) || []
+            });
         }
     } catch (error) {
         console.error('Error in send-now:', error);
         res.status(500).json({ success: false, message: 'Failed to send message: ' + error.message });
+    }
+});
+
+// Update target group for a scheduled card
+app.put('/scheduled-cards/:id/target-group', requireAdmin, (req, res) => {
+    try {
+        const { id } = req.params;
+        const { targetGroup } = req.body;
+        if (!targetGroup || !targetGroup.trim()) {
+            return res.status(400).json({ success: false, message: 'Missing targetGroup.' });
+        }
+        const jobs = getScheduledJobs();
+        const job = jobs.find(j => j.id === id);
+        if (!job) {
+            return res.status(404).json({ success: false, message: 'Scheduled task not found.' });
+        }
+        job.targetGroup = targetGroup.trim();
+        saveScheduledJobs(jobs);
+        console.log(`✏️ Updated target group for job ${id} to "${job.targetGroup}"`);
+        res.status(200).json({ success: true, job });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
