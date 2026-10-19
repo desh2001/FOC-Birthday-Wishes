@@ -17,7 +17,15 @@ export default function GenerateCardModal({ student, onClose }) {
   const [textColor, setTextColor] = useState('#f9f2e3');
   const [fontLoaded, setFontLoaded] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [scheduleTime, setScheduleTime] = useState('08:00');
+  const [scheduleTime, setScheduleTime] = useState('00:00');
+  const [targetGroup, setTargetGroup] = useState(() => {
+    return localStorage.getItem('foc_target_group') || 'FOC USJ Birthdays';
+  });
+
+  const handleTargetGroupChange = (val) => {
+    setTargetGroup(val);
+    localStorage.setItem('foc_target_group', val);
+  };
 
   // Canvas fixed dimensions
   const CANVAS_W = 1080;
@@ -236,7 +244,7 @@ export default function GenerateCardModal({ student, onClose }) {
             const formData = new FormData();
             formData.append('image', blob, fileName);
             formData.append('caption', caption);
-            formData.append('targetGroup', 'Bs');
+            formData.append('targetGroup', targetGroup.trim() || 'FOC USJ Birthdays');
 
             let adminKey = getAdminKey();
             let response = await fetch(`${BOT_API_URL}/send-to-group`, {
@@ -338,7 +346,7 @@ export default function GenerateCardModal({ student, onClose }) {
             const formData = new FormData();
             formData.append('image', blob, `Birthday_Card_${studentName.replace(/\s+/g, '_')}.png`);
             formData.append('caption', caption);
-            formData.append('targetGroup', 'FOC USJ Birthdays'); 
+            formData.append('targetGroup', targetGroup.trim() || 'FOC USJ Birthdays'); 
             formData.append('scheduledTime', targetDate.toISOString());
 
             let adminKey = getAdminKey();
@@ -542,6 +550,29 @@ export default function GenerateCardModal({ student, onClose }) {
                 <h3><Share2 size={18} /> Caption & Delivery</h3>
 
                 <div className="control-group">
+                    <label>Target WhatsApp Group</label>
+                    <input 
+                        type="text" 
+                        value={targetGroup} 
+                        onChange={(e) => handleTargetGroupChange(e.target.value)} 
+                        placeholder="e.g. FOC USJ Birthdays"
+                        style={{ 
+                            width: '100%', 
+                            padding: '10px', 
+                            borderRadius: 'var(--radius-sm)', 
+                            border: '1px solid var(--border-glass)', 
+                            background: 'rgba(0,0,0,0.15)', 
+                            color: 'var(--text-primary)',
+                            fontSize: '0.9rem',
+                            marginTop: '6px'
+                        }}
+                    />
+                    <small className="control-hint" style={{ marginTop: '4px', display: 'block', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                      Exact name of the WhatsApp group where the bot is a member.
+                    </small>
+                </div>
+
+                <div className="control-group">
                     <label>WhatsApp Message / Caption</label>
                     <textarea 
                         rows={4}
@@ -563,13 +594,76 @@ export default function GenerateCardModal({ student, onClose }) {
                 </div>
 
                 <div className="control-group">
-                    <label>Schedule Delivery Time</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label>Schedule Delivery Time</label>
+                      <span style={{ fontSize: '0.8rem', color: '#38bdf8', fontWeight: 600 }}>
+                        {scheduleTime === '00:00' ? '12:00 AM (Midnight)' : `${scheduleTime}`}
+                      </span>
+                    </div>
                     <input 
                         type="time" 
                         value={scheduleTime} 
                         onChange={(e) => setScheduleTime(e.target.value)} 
-                        style={{ width: '100%', padding: '10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)', background: 'rgba(0,0,0,0.15)', color: 'var(--text-primary)' }}
+                        style={{ 
+                            width: '100%', 
+                            padding: '10px', 
+                            borderRadius: 'var(--radius-sm)', 
+                            border: '1px solid var(--border-glass)', 
+                            background: 'rgba(0,0,0,0.15)', 
+                            color: 'var(--text-primary)',
+                            marginTop: '6px'
+                        }}
                     />
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                      <button 
+                        type="button" 
+                        onClick={() => setScheduleTime('00:00')}
+                        style={{
+                          padding: '5px 10px',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-glass)',
+                          background: scheduleTime === '00:00' ? '#0284c7' : 'rgba(255,255,255,0.06)',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontWeight: scheduleTime === '00:00' ? '600' : 'normal'
+                        }}
+                      >
+                        🌙 12:00 AM (Midnight - Default)
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => setScheduleTime('08:00')}
+                        style={{
+                          padding: '5px 10px',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-glass)',
+                          background: scheduleTime === '08:00' ? '#0284c7' : 'rgba(255,255,255,0.06)',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontWeight: scheduleTime === '08:00' ? '600' : 'normal'
+                        }}
+                      >
+                        ☀️ 08:00 AM (Morning)
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => setScheduleTime('09:00')}
+                        style={{
+                          padding: '5px 10px',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-glass)',
+                          background: scheduleTime === '09:00' ? '#0284c7' : 'rgba(255,255,255,0.06)',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontWeight: scheduleTime === '09:00' ? '600' : 'normal'
+                        }}
+                      >
+                        09:00 AM
+                      </button>
+                    </div>
                 </div>
               </div>
             )}
