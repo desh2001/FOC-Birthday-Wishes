@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, CalendarClock, Trash2, AlertCircle } from 'lucide-react';
+import { X, CalendarClock, Trash2, AlertCircle, Send } from 'lucide-react';
 import { BOT_API_URL, getAdminKey, setAdminKey } from '../../utils.js';
 
 export default function ScheduledMessagesModal({ onClose }) {
@@ -63,6 +63,44 @@ export default function ScheduledMessagesModal({ onClose }) {
     } catch (err) {
       console.error("Error canceling job:", err);
       alert("Network error: Could not cancel the scheduled message.");
+    }
+  };
+
+  const [sendingId, setSendingId] = useState(null);
+
+  const handleSendNow = async (id) => {
+    if (!window.confirm('Send this card to the WhatsApp group right now?')) return;
+    try {
+      setSendingId(id);
+      let adminKey = getAdminKey();
+      let response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}/send-now`, {
+        method: 'POST',
+        headers: { ...(adminKey && { 'x-admin-key': adminKey }) }
+      });
+
+      if (response.status === 401) {
+        const enteredKey = prompt("Sending requires the Admin Key. Please enter it:");
+        if (enteredKey) {
+          setAdminKey(enteredKey);
+          response = await fetch(`${BOT_API_URL}/scheduled-cards/${id}/send-now`, {
+            method: 'POST',
+            headers: { 'x-admin-key': enteredKey.trim() }
+          });
+        }
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        alert(data.message || 'Card sent to group successfully!');
+        setJobs(jobs.filter(job => job.id !== id));
+      } else {
+        alert(`Failed to send: ${data.message}`);
+      }
+    } catch (err) {
+      console.error("Error sending card now:", err);
+      alert("Network error: Could not send the card.");
+    } finally {
+      setSendingId(null);
     }
   };
 
@@ -170,26 +208,52 @@ export default function ScheduledMessagesModal({ onClose }) {
                                 </div>
                             </div>
                             
-                            <button 
-                                onClick={() => handleCancelJob(job.id)}
-                                style={{ 
-                                    background: 'rgba(239, 68, 68, 0.1)', 
-                                    color: '#ef4444', 
-                                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                                    padding: '10px 16px',
-                                    borderRadius: 'var(--radius-sm)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    cursor: 'pointer',
-                                    fontWeight: 'bold',
-                                    transition: 'all 0.2s'
-                                }}
-                                onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)' }}
-                                onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)' }}
-                            >
-                                <Trash2 size={18} /> Cancel
-                            </button>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+                              <button 
+                                  onClick={() => handleSendNow(job.id)}
+                                  disabled={sendingId === job.id}
+                                  style={{ 
+                                      background: 'rgba(16, 185, 129, 0.15)', 
+                                      color: '#10B981', 
+                                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                                      padding: '8px 14px',
+                                      borderRadius: 'var(--radius-sm)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      cursor: 'pointer',
+                                      fontWeight: '600',
+                                      fontSize: '0.85rem',
+                                      opacity: sendingId === job.id ? 0.6 : 1,
+                                      transition: 'all 0.2s'
+                                  }}
+                                  onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.25)' }}
+                                  onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)' }}
+                              >
+                                  <Send size={16} /> {sendingId === job.id ? 'Sending...' : 'Send Now'}
+                              </button>
+                              <button 
+                                  onClick={() => handleCancelJob(job.id)}
+                                  style={{ 
+                                      background: 'rgba(239, 68, 68, 0.1)', 
+                                      color: '#ef4444', 
+                                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                                      padding: '8px 14px',
+                                      borderRadius: 'var(--radius-sm)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      cursor: 'pointer',
+                                      fontWeight: '600',
+                                      fontSize: '0.85rem',
+                                      transition: 'all 0.2s'
+                                  }}
+                                  onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)' }}
+                                  onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)' }}
+                              >
+                                  <Trash2 size={16} /> Cancel
+                              </button>
+                            </div>
                         </div>
                     ))}
                 </div>

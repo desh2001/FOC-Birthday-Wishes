@@ -21,6 +21,45 @@ export default function GenerateCardModal({ student, onClose }) {
   const [targetGroup, setTargetGroup] = useState(() => {
     return localStorage.getItem('foc_target_group') || 'FOC USJ Birthdays';
   });
+  const [availableGroups, setAvailableGroups] = useState([]);
+
+  // Calculate student's upcoming birthday date as YYYY-MM-DD
+  const getUpcomingBirthdayDateString = () => {
+    const parts = (student.birthday || '').split('/');
+    if (parts.length !== 3) {
+      const today = new Date();
+      return today.toISOString().split('T')[0];
+    }
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const now = new Date();
+    let d = new Date(now.getFullYear(), month, day);
+    if (d < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+      d.setFullYear(now.getFullYear() + 1);
+    }
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const [scheduleDate, setScheduleDate] = useState(getUpcomingBirthdayDateString);
+
+  // Fetch live WhatsApp groups that the bot is currently in
+  useEffect(() => {
+    fetch(`${BOT_API_URL}/groups`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.groups) && data.groups.length > 0) {
+          setAvailableGroups(data.groups);
+          const saved = localStorage.getItem('foc_target_group');
+          if (!saved && data.groups.length > 0) {
+            setTargetGroup(data.groups[0].name);
+          }
+        }
+      })
+      .catch(err => console.log('Could not load groups:', err));
+  }, []);
 
   const handleTargetGroupChange = (val) => {
     setTargetGroup(val);
@@ -308,29 +347,27 @@ export default function GenerateCardModal({ student, onClose }) {
   const handleScheduleWhatsApp = async () => {
     if (!canvasRef.current) return;
 
-    // Calculate upcoming birthday + selected time
-    const parts = student.birthday.split('/');
-    if (parts.length !== 3) {
-        alert("Invalid birthday format for this student.");
+    if (!targetGroup.trim()) {
+        alert("Please select or enter a Target WhatsApp Group name.");
         return;
     }
-    const day = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    
-    const now = new Date();
-    let targetDate = new Date(now.getFullYear(), month, day);
-    
-    // If birthday has passed this year (comparing dates ignoring time)
-    if (targetDate < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
-        targetDate.setFullYear(now.getFullYear() + 1);
+
+    if (!scheduleDate) {
+        alert("Please choose a schedule date.");
+        return;
     }
 
-    const [hours, minutes] = scheduleTime.split(':');
-    targetDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+    const [year, month, day] = scheduleDate.split('-').map(Number);
+    const [hours, minutes] = (scheduleTime || '00:00').split(':').map(Number);
+    const targetDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
 
-    // If target date with time is in the past (e.g. today earlier), schedule for next year
+    const now = new Date();
     if (targetDate <= now) {
-        targetDate.setFullYear(targetDate.getFullYear() + 1);
+        const proceed = window.confirm(`The scheduled time (${targetDate.toLocaleString()}) has already passed!\n\nClick OK to send it to "${targetGroup}" immediately, or Cancel to pick a future date/time.`);
+        if (proceed) {
+            handleShareWhatsApp();
+        }
+        return;
     }
 
     setIsSending(true);
@@ -550,12 +587,20 @@ export default function GenerateCardModal({ student, onClose }) {
                 <h3><Share2 size={18} /> Caption & Delivery</h3>
 
                 <div className="control-group">
-                    <label>Target WhatsApp Group</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label>Target WhatsApp Group</label>
+                      {availableGroups.length > 0 && (
+                        <span style={{ fontSize: '0.75rem', color: '#10B981', fontWeight: 500 }}>
+                          ✓ {availableGroups.length} groups detected on WhatsApp
+                        </span>
+                      )}
+                    </div>
                     <input 
                         type="text" 
+                        list="whatsapp-groups-list"
                         value={targetGroup} 
                         onChange={(e) => handleTargetGroupChange(e.target.value)} 
-                        placeholder="e.g. FOC USJ Birthdays"
+                        placeholder="Select or type WhatsApp group name"
                         style={{ 
                             width: '100%', 
                             padding: '10px', 
@@ -567,8 +612,15 @@ export default function GenerateCardModal({ student, onClose }) {
                             marginTop: '6px'
                         }}
                     />
+                    <datalist id="whatsapp-groups-list">
+                      {availableGroups.map((g, idx) => (
+                        <option key={idx} value={g.name} />
+                      ))}
+                    </datalist>
                     <small className="control-hint" style={{ marginTop: '4px', display: 'block', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-                      Exact name of the WhatsApp group where the bot is a member.
+                      {availableGroups.length > 0 
+                        ? "Choose from the dropdown or type the exact WhatsApp group name." 
+                        : "Type the exact WhatsApp group name where the bot is a member."}
                     </small>
                 </div>
 
@@ -591,6 +643,67 @@ export default function GenerateCardModal({ student, onClose }) {
                             marginTop: '6px'
                         }}
                     />
+                </div>
+
+                <div className="control-group">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label>Schedule Delivery Date</label>
+                      <span style={{ fontSize: '0.8rem', color: '#38bdf8', fontWeight: 600 }}>
+                        {scheduleDate}
+                      </span>
+                    </div>
+                    <input 
+                        type="date" 
+                        value={scheduleDate} 
+                        onChange={(e) => setScheduleDate(e.target.value)} 
+                        style={{ 
+                            width: '100%', 
+                            padding: '10px', 
+                            borderRadius: 'var(--radius-sm)', 
+                            border: '1px solid var(--border-glass)', 
+                            background: 'rgba(0,0,0,0.15)', 
+                            color: 'var(--text-primary)',
+                            marginTop: '6px'
+                        }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                      <button 
+                        type="button" 
+                        onClick={() => setScheduleDate(getUpcomingBirthdayDateString())}
+                        style={{
+                          padding: '5px 10px',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-glass)',
+                          background: scheduleDate === getUpcomingBirthdayDateString() ? '#0284c7' : 'rgba(255,255,255,0.06)',
+                          color: '#fff',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🎂 Next Birthday ({getUpcomingBirthdayDateString()})
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const today = new Date();
+                          const yyyy = today.getFullYear();
+                          const mm = String(today.getMonth() + 1).padStart(2, '0');
+                          const dd = String(today.getDate()).padStart(2, '0');
+                          setScheduleDate(`${yyyy}-${mm}-${dd}`);
+                        }}
+                        style={{
+                          padding: '5px 10px',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-glass)',
+                          background: 'rgba(255,255,255,0.06)',
+                          color: '#38bdf8',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ⚡ Today (Test Schedule)
+                      </button>
+                    </div>
                 </div>
 
                 <div className="control-group">
@@ -664,6 +777,17 @@ export default function GenerateCardModal({ student, onClose }) {
                         09:00 AM
                       </button>
                     </div>
+                </div>
+
+                <div style={{ 
+                  background: 'rgba(56, 189, 248, 0.08)', 
+                  border: '1px solid rgba(56, 189, 248, 0.25)', 
+                  borderRadius: 'var(--radius-sm)', 
+                  padding: '12px',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-secondary)'
+                }}>
+                  <strong style={{ color: '#38bdf8' }}>Delivery Preview:</strong> Will be sent to <strong style={{ color: '#fff' }}>"{targetGroup}"</strong> on <strong style={{ color: '#fff' }}>{scheduleDate}</strong> at <strong style={{ color: '#fff' }}>{scheduleTime === '00:00' ? '12:00 AM' : scheduleTime}</strong>.
                 </div>
               </div>
             )}

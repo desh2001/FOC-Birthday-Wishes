@@ -438,38 +438,76 @@ function getScheduledJobs() {
     }
 }
 
-async function sendScheduledMessage(jobData) {
+async function findGroupChat(target) {
+    if (!client || !target) return null;
+    const cleanTarget = String(target).trim().toLowerCase();
+
     try {
-        console.log(`Executing scheduled job for ${jobData.targetGroup}...`);
+        const chats = await client.getChats();
+        const groupChats = chats.filter(c => c.isGroup || c.id?._serialized?.endsWith('@g.us'));
+
+        console.log(`📋 WhatsApp Bot sees ${groupChats.length} groups: [${groupChats.map(g => `"${g.name}"`).join(', ')}]`);
+
+        // 1. Direct serialized ID match (e.g. 120363023456@g.us)
+        let found = groupChats.find(c => c.id?._serialized === target.trim());
+        if (found) return found;
+
+        // 2. Exact match (case-insensitive & trimmed)
+        found = groupChats.find(c => (c.name || '').trim().toLowerCase() === cleanTarget);
+        if (found) return found;
+
+        // 3. Partial match (case-insensitive contains)
+        found = groupChats.find(c => (c.name || '').toLowerCase().includes(cleanTarget));
+        if (found) return found;
+
+        // 4. Reverse partial match (target contains group name)
+        found = groupChats.find(c => c.name && cleanTarget.includes(c.name.trim().toLowerCase()));
+        if (found) return found;
+
+        console.warn(`❌ Could not find group matching "${target}". Available groups:`, groupChats.map(g => g.name));
+        return null;
+    } catch (err) {
+        console.error('Error in findGroupChat:', err);
+        return null;
+    }
+}
+
+async function sendScheduledMessage(jobData) {
+    let success = false;
+    try {
+        console.log(`Executing scheduled job for "${jobData.targetGroup}"...`);
         if (!fs.existsSync(jobData.filePath)) {
             console.error(`File missing for scheduled job: ${jobData.filePath}`);
-            return;
+            return false;
         }
 
-        const chats = await client.getChats();
-        const groupChat = chats.find(chat => chat.isGroup && chat.name === jobData.targetGroup);
+        const groupChat = await findGroupChat(jobData.targetGroup);
 
         if (groupChat) {
             const media = MessageMedia.fromFilePath(jobData.filePath);
             await client.sendMessage(groupChat.id._serialized, media, { caption: jobData.caption });
-            console.log(`✅ Scheduled card successfully sent to group: ${jobData.targetGroup}`);
+            console.log(`✅ Scheduled card successfully sent to group: "${groupChat.name}" (${groupChat.id._serialized})`);
+            success = true;
         } else {
             console.error(`❌ Could not find group "${jobData.targetGroup}" to send scheduled message.`);
         }
     } catch (error) {
         console.error('❌ Error sending scheduled message:', error);
     } finally {
-        // Clean up image file safely
-        if (jobData.filePath && fs.existsSync(jobData.filePath)) {
-            const resolvedPath = path.resolve(jobData.filePath);
-            if (resolvedPath.startsWith(path.resolve(CARDS_DIR))) {
-                fs.unlinkSync(resolvedPath);
+        if (success) {
+            // Clean up image file only when message was actually sent
+            if (jobData.filePath && fs.existsSync(jobData.filePath)) {
+                const resolvedPath = path.resolve(jobData.filePath);
+                if (resolvedPath.startsWith(path.resolve(CARDS_DIR))) {
+                    try { fs.unlinkSync(resolvedPath); } catch {}
+                }
             }
+            const jobs = getScheduledJobs();
+            const updatedJobs = jobs.filter(j => j.id !== jobData.id);
+            saveScheduledJobs(updatedJobs);
         }
-        const jobs = getScheduledJobs();
-        const updatedJobs = jobs.filter(j => j.id !== jobData.id);
-        saveScheduledJobs(updatedJobs);
     }
+    return success;
 }
 
 function loadScheduledJobs() {
@@ -591,11 +629,10 @@ app.post('/send-to-group', requireAdmin, upload.single('image'), async (req, res
             return res.status(400).json({ success: false, message: 'Missing caption, targetGroup, or image file.' });
         }
 
-        const chats = await client.getChats();
-        const groupChat = chats.find(chat => chat.isGroup && chat.name === targetGroup);
+        const groupChat = await findGroupChat(targetGroup);
 
         if (!groupChat) {
-            return res.status(404).json({ success: false, message: `Could not find a group named "${targetGroup}". Please check the name exactly.` });
+            return res.status(404).json({ success: false, message: `Could not find a group matching "${targetGroup}". Please check your WhatsApp group name exactly.` });
         }
 
         const base64Image = file.buffer.toString('base64');
@@ -603,12 +640,32 @@ app.post('/send-to-group', requireAdmin, upload.single('image'), async (req, res
 
         await client.sendMessage(groupChat.id._serialized, media, { caption: caption });
         
-        console.log(`✅ Successfully sent card to group: ${targetGroup}`);
-        res.status(200).json({ success: true, message: 'Message sent successfully!' });
+        console.log(`✅ Successfully sent card to group: "${groupChat.name}" (${groupChat.id._serialized})`);
+        res.status(200).json({ success: true, message: `Message sent successfully to ${groupChat.name}!` });
 
     } catch (error) {
         console.error('Error sending message:', error);
         res.status(500).json({ success: false, message: 'Failed to send message: ' + error.message });
+    }
+});
+
+// ── Get WhatsApp Groups list for easy UI selection ───────────────────────────
+app.get('/groups', async (req, res) => {
+    try {
+        if (!isClientReady || !client) {
+            return res.status(503).json({ success: false, message: 'WhatsApp bot is not ready yet.' });
+        }
+        const chats = await client.getChats();
+        const groups = chats
+            .filter(c => c.isGroup || c.id?._serialized?.endsWith('@g.us'))
+            .map(c => ({
+                id: c.id._serialized,
+                name: c.name || c.formattedTitle || 'Unnamed Group'
+            }));
+        res.status(200).json({ success: true, groups });
+    } catch (err) {
+        console.error('Error fetching groups:', err);
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
@@ -711,6 +768,37 @@ app.delete('/scheduled-cards/:id', requireAdmin, (req, res) => {
     } catch (error) {
         console.error('Error canceling scheduled message:', error);
         res.status(500).json({ success: false, message: 'Failed to cancel scheduled message: ' + error.message });
+    }
+});
+
+// Trigger a scheduled card to send immediately
+app.post('/scheduled-cards/:id/send-now', requireAdmin, async (req, res) => {
+    try {
+        if (!isClientReady || !client) {
+            return res.status(503).json({ success: false, message: 'WhatsApp bot is not ready yet. Please ensure WhatsApp is linked.' });
+        }
+        const { id } = req.params;
+        const jobs = getScheduledJobs();
+        const job = jobs.find(j => j.id === id);
+        if (!job) {
+            return res.status(404).json({ success: false, message: 'Scheduled task not found.' });
+        }
+        
+        // Cancel the scheduled timer since we are sending it right now
+        if (schedule.scheduledJobs[id]) {
+            schedule.scheduledJobs[id].cancel();
+        }
+
+        console.log(`🚀 Manually triggering scheduled card ${id} for group "${job.targetGroup}"`);
+        const success = await sendScheduledMessage(job);
+        if (success) {
+            res.status(200).json({ success: true, message: `Card successfully sent to ${job.targetGroup}!` });
+        } else {
+            res.status(500).json({ success: false, message: `Could not send to group "${job.targetGroup}". Please check if the bot is in this group.` });
+        }
+    } catch (error) {
+        console.error('Error in send-now:', error);
+        res.status(500).json({ success: false, message: 'Failed to send message: ' + error.message });
     }
 });
 
