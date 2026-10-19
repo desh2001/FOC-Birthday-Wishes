@@ -32,9 +32,10 @@ dist-ssr/
 .env.*.local
 !.env.example
 
-# WhatsApp bot session data & cache (never commit these)
+# WhatsApp bot session data & cache
 .wwebjs_auth/
 .wwebjs_cache/
+!.wwebjs_cache/*.html
 
 # Runtime data & persistent storage (volume data)
 data/

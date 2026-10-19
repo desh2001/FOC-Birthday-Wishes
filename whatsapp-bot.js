@@ -1,6 +1,7 @@
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode-terminal';
+import QRCode from 'qrcode';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -132,72 +133,129 @@ app.use('/img', express.static(PUBLIC_IMG_DIR));
 let isClientReady = false;
 let latestQr = null;
 let botStatusMessage = 'Launching Chromium browser and loading WhatsApp Web...';
+let client = null;
+let isStarting = false;
 
-// Initialize WhatsApp client with modern browser headers and remote webVersionCache
-const client = new Client({
-    authStrategy: new LocalAuth(AUTH_DIR ? { dataPath: AUTH_DIR } : {}),
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018942289-alpha.html'
-    },
-    puppeteer: {
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
+function createClient() {
+    const localCachePath = path.resolve('.wwebjs_cache');
+    const hasLocalVersion = fs.existsSync(path.join(localCachePath, '2.3000.1050789799-alpha.html'));
+
+    const webVersionCacheConfig = hasLocalVersion
+        ? {
+            type: 'local',
+            path: localCachePath,
+            strict: false
+        }
+        : {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html',
+            strict: false
+        };
+
+    console.log(`📦 WhatsApp Web Cache Config: ${webVersionCacheConfig.type} (Local: ${hasLocalVersion})`);
+
+    const newClient = new Client({
+        authStrategy: new LocalAuth(AUTH_DIR ? { dataPath: AUTH_DIR } : {}),
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        webVersion: '2.3000.1050789799-alpha',
+        webVersionCache: webVersionCacheConfig,
+        authTimeoutMs: 120000,
+        puppeteer: {
+            headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+                '--disable-extensions',
+                '--disable-software-rasterizer'
+            ]
+        }
+    });
+
+    newClient.on('qr', (qr) => {
+        latestQr = qr;
+        botStatusMessage = 'QR code generated! Scan with your WhatsApp app.';
+        console.log('SCAN THIS QR CODE TO LOG IN:');
+        qrcode.generate(qr, { small: true });
+    });
+
+    newClient.on('ready', () => {
+        console.log('✅ WhatsApp Bot is Ready and Logged In!');
+        isClientReady = true;
+        botStatusMessage = 'WhatsApp is connected and logged in!';
+        loadScheduledJobs();
+    });
+
+    newClient.on('authenticated', () => {
+        latestQr = null;
+        botStatusMessage = 'WhatsApp authenticated successfully!';
+        console.log('WhatsApp authenticated successfully!');
+    });
+
+    newClient.on('loading_screen', (percent, message) => {
+        botStatusMessage = `Loading WhatsApp Web: ${percent}% - ${message}`;
+        console.log(`⏳ ${botStatusMessage}`);
+    });
+
+    newClient.on('change_state', (state) => {
+        botStatusMessage = `WhatsApp state changed: ${state}`;
+        console.log(`🔄 ${botStatusMessage}`);
+    });
+
+    newClient.on('auth_failure', (msg) => {
+        botStatusMessage = `Authentication failure: ${msg}`;
+        console.error('WhatsApp authentication failure:', msg);
+    });
+
+    newClient.on('disconnected', (reason) => {
+        botStatusMessage = `WhatsApp disconnected: ${reason}`;
+        console.warn(`⚠️ ${botStatusMessage}`);
+        isClientReady = false;
+        latestQr = null;
+        startWhatsAppClient(10000);
+    });
+
+    return newClient;
+}
+
+async function startWhatsAppClient(delayMs = 0) {
+    if (isStarting) return;
+    isStarting = true;
+
+    if (delayMs > 0) {
+        console.log(`⏳ Waiting ${delayMs / 1000}s before WhatsApp client launch...`);
+        await new Promise(r => setTimeout(r, delayMs));
     }
-});
 
-// WhatsApp event listeners
-client.on('qr', (qr) => {
-    latestQr = qr;
-    botStatusMessage = 'QR code generated and waiting for scan.';
-    console.log('SCAN THIS QR CODE TO LOG IN:');
-    qrcode.generate(qr, { small: true });
-});
+    if (client) {
+        try {
+            console.log('🛑 Cleaning up previous WhatsApp client...');
+            await client.destroy();
+        } catch (e) {
+            console.warn('Note on client cleanup:', e.message);
+        }
+    }
 
-client.on('ready', () => {
-    console.log('✅ WhatsApp Bot is Ready and Logged In!');
-    isClientReady = true;
-    botStatusMessage = 'WhatsApp is connected and logged in!';
-    loadScheduledJobs();
-});
+    botStatusMessage = 'Launching Chromium browser and loading WhatsApp Web...';
+    console.log('🔄 Initializing WhatsApp client...');
+    client = createClient();
 
-client.on('authenticated', () => {
-    latestQr = null;
-    botStatusMessage = 'WhatsApp authenticated successfully!';
-    console.log('WhatsApp authenticated successfully!');
-});
-
-client.on('loading_screen', (percent, message) => {
-    botStatusMessage = `Loading WhatsApp Web: ${percent}% - ${message}`;
-    console.log(`⏳ ${botStatusMessage}`);
-});
-
-client.on('change_state', (state) => {
-    botStatusMessage = `WhatsApp state changed: ${state}`;
-    console.log(`🔄 ${botStatusMessage}`);
-});
-
-client.on('auth_failure', (msg) => {
-    botStatusMessage = `Authentication failure: ${msg}`;
-    console.error('WhatsApp authentication failure:', msg);
-});
-
-client.on('disconnected', (reason) => {
-    botStatusMessage = `WhatsApp disconnected: ${reason}`;
-    console.warn(`⚠️ ${botStatusMessage}`);
-    isClientReady = false;
-    latestQr = null;
-});
+    try {
+        await client.initialize();
+        isStarting = false;
+    } catch (err) {
+        isStarting = false;
+        const errMsg = err?.message || String(err);
+        console.error('❌ WhatsApp client initialization error:', errMsg);
+        botStatusMessage = `Initialization error (${errMsg}). Retrying in 15 seconds...`;
+        startWhatsAppClient(15000);
+    }
+}
 
 // ── Health Check Endpoint ───────────────────────────────────────────────────
 app.get('/health', (req, res) => {
@@ -281,8 +339,7 @@ app.get('/qr', async (req, res) => {
 </html>`);
     }
     try {
-        const QRCode = await import('qrcode');
-        const qrDataUrl = await QRCode.default.toDataURL(latestQr);
+        const qrDataUrl = await QRCode.toDataURL(latestQr);
         const queryKey = req.query.key ? `?key=${encodeURIComponent(req.query.key)}` : '';
         res.send(`<!DOCTYPE html>
 <html>
@@ -667,8 +724,6 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Express API running on http://0.0.0.0:${PORT}`);
-    console.log(`Waiting for WhatsApp client to initialize...`);
-    client.initialize().catch((err) => {
-        console.error('❌ WhatsApp client initialization error:', err);
-    });
+    console.log(`Starting WhatsApp client...`);
+    startWhatsAppClient();
 });

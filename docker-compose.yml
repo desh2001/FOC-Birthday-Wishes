@@ -22,6 +22,7 @@ services:
       dockerfile: Dockerfile.whatsapp
     container_name: birthday-bot
     restart: unless-stopped
+    shm_size: '512m'
     environment:
       - PORT=3001
       - BOT_DATA_DIR=/data
