@@ -136,6 +136,29 @@ let botStatusMessage = 'Launching Chromium browser and loading WhatsApp Web...';
 let client = null;
 let isStarting = false;
 
+// Remove Chromium process singleton locks that cause "profile appears to be in use" errors after restarts
+function cleanChromiumLocks(dirPath) {
+    if (!dirPath || !fs.existsSync(dirPath)) return;
+    try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dirPath, entry.name);
+            if (entry.name.startsWith('Singleton') || entry.name === 'DevToolsActivePort') {
+                try {
+                    fs.unlinkSync(fullPath);
+                    console.log(`🔓 Removed stale Chromium lock file: ${fullPath}`);
+                } catch (e) {
+                    console.warn(`Could not remove ${fullPath}:`, e.message);
+                }
+            } else if (entry.isDirectory()) {
+                cleanChromiumLocks(fullPath);
+            }
+        }
+    } catch (err) {
+        console.warn('Error cleaning Chromium locks:', err.message);
+    }
+}
+
 function createClient() {
     const localCachePath = path.resolve('.wwebjs_cache');
     const hasLocalVersion = fs.existsSync(path.join(localCachePath, '2.3000.1050789799-alpha.html'));
@@ -172,7 +195,8 @@ function createClient() {
                 '--no-zygote',
                 '--disable-gpu',
                 '--disable-extensions',
-                '--disable-software-rasterizer'
+                '--disable-software-rasterizer',
+                '--headless=new'
             ]
         }
     });
@@ -241,6 +265,11 @@ async function startWhatsAppClient(delayMs = 0) {
         }
     }
 
+    // Always clear stale lockfiles created by killed or previous containers
+    if (AUTH_DIR) {
+        cleanChromiumLocks(AUTH_DIR);
+    }
+
     botStatusMessage = 'Launching Chromium browser and loading WhatsApp Web...';
     console.log('🔄 Initializing WhatsApp client...');
     client = createClient();
@@ -299,6 +328,27 @@ app.get('/qr', async (req, res) => {
 </html>`);
     }
 
+    if (req.query.unlock === '1' || req.query.reset === '1') {
+        console.log(`🔄 User requested WhatsApp action: ${req.query.reset === '1' ? 'RESET' : 'UNLOCK'}`);
+        if (AUTH_DIR) {
+            cleanChromiumLocks(AUTH_DIR);
+            if (req.query.reset === '1') {
+                try {
+                    const sessionPath = path.join(AUTH_DIR, 'session');
+                    if (fs.existsSync(sessionPath)) {
+                        fs.rmSync(sessionPath, { recursive: true, force: true });
+                        console.log('🗑️ Removed session folder on user request.');
+                    }
+                } catch (e) {
+                    console.warn('Could not reset session folder:', e.message);
+                }
+            }
+        }
+        startWhatsAppClient(500);
+        const queryKey = req.query.key ? `?key=${encodeURIComponent(req.query.key)}` : '';
+        return res.redirect(`/qr${queryKey}`);
+    }
+
     if (isClientReady) {
         return res.send(`<!DOCTYPE html>
 <html>
@@ -318,13 +368,14 @@ app.get('/qr', async (req, res) => {
   <meta http-equiv="refresh" content="4;url=/qr${queryKey}">
   <style>
     body { background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; text-align: center; }
-    .card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 32px; max-width: 440px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+    .card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 32px; max-width: 460px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
     h2 { margin-top: 0; color: #38bdf8; font-size: 1.4rem; }
-    .status { background: rgba(15, 23, 42, 0.7); padding: 12px 16px; border-radius: 8px; border-left: 4px solid #38bdf8; font-family: monospace; font-size: 0.9rem; margin: 16px 0; color: #e2e8f0; }
+    .status { background: rgba(15, 23, 42, 0.7); padding: 12px 16px; border-radius: 8px; border-left: 4px solid #38bdf8; font-family: monospace; font-size: 0.85rem; margin: 16px 0; color: #e2e8f0; word-break: break-word; text-align: left; }
     p { color: #94a3b8; font-size: 0.85rem; margin: 8px 0; }
     .spinner { border: 3px solid rgba(255, 255, 255, 0.1); border-top: 3px solid #38bdf8; border-radius: 50%; width: 36px; height: 36px; animation: spin 1s linear infinite; margin: 16px auto; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    .btn { display: inline-block; margin-top: 16px; padding: 8px 20px; background: #0284c7; color: #fff; text-decoration: none; border-radius: 8px; font-size: 0.85rem; }
+    .btn { display: inline-block; padding: 8px 16px; background: #0284c7; color: #fff; text-decoration: none; border-radius: 8px; font-size: 0.85rem; font-weight: 500; transition: opacity 0.2s; }
+    .btn:hover { opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -332,8 +383,12 @@ app.get('/qr', async (req, res) => {
     <div class="spinner"></div>
     <h2>⏳ Initializing WhatsApp...</h2>
     <div class="status">${botStatusMessage}</div>
-    <p>Chromium is connecting to WhatsApp Web. The QR code will appear here automatically in a few moments.</p>
-    <a href="/qr${queryKey}" class="btn">Refresh Now</a>
+    <p>Chromium is connecting to WhatsApp Web. The QR code will appear here automatically.</p>
+    <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+      <a href="/qr${queryKey}" class="btn">Refresh Now</a>
+      <a href="/qr${queryKey ? queryKey + '&' : '?'}unlock=1" class="btn" style="background:#059669;">Unlock Browser</a>
+      <a href="/qr${queryKey ? queryKey + '&' : '?'}reset=1" class="btn" style="background:#dc2626;" onclick="return confirm('Are you sure you want to reset the WhatsApp session?');">Reset Session</a>
+    </div>
   </div>
 </body>
 </html>`);
